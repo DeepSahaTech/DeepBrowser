@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.deepbrowser.tv.data.NavMode
 
 /**
  * Pure UI-mode state of the browser: overlays (command bar, device info, panels), reader on/off, fullscreen player
@@ -14,19 +15,22 @@ class ChromeState {
     var info by mutableStateOf(false)
     var panel by mutableStateOf<Panel?>(null)
     var reader by mutableStateOf(false); private set
-    var cursorMode by mutableStateOf(false) // smart D-pad focus is the default; the cursor is optional
+    var navMode by mutableStateOf(NavMode.FOCUS) // smart D-pad focus is the default; the cursor is optional
     var zoomPercent by mutableIntStateOf(100); private set
     var fsControls = false; private set
     var okLong = false; private set
 
     val overlayOpen: Boolean get() = commandBar || info || panel != null
+    /** The focus ring is drawn on a page only when no overlay owns the remote. */
+    val ringVisible: Boolean get() = navMode == NavMode.FOCUS && !overlayOpen
+    val pointerVisible: Boolean get() = navMode == NavMode.POINTER && !overlayOpen
 
     fun owner(isHome: Boolean) = FocusOwner.of(panel != null, commandBar, info, isHome)
 
     fun keyState(fullscreen: Boolean, imeVisible: Boolean, isHome: Boolean, nativeKeys: Boolean) = KeyState(
         fullscreen = fullscreen, fsControls = fsControls, imeVisible = !fullscreen && imeVisible,
         overlayOpen = overlayOpen, isHome = isHome, readerOn = reader,
-        nativeKeys = nativeKeys, cursorMode = cursorMode, okLongFired = okLong,
+        nativeKeys = nativeKeys, cursorMode = navMode == NavMode.POINTER, okLongFired = okLong,
     )
 
     /** Key activity in fullscreen keeps the site's controls up: true = re-arm the [FS_CONTROLS_MS] hide timer. */
@@ -65,7 +69,7 @@ class ChromeState {
     /** @return false when there is nothing to toggle (Home). */
     fun beginReader(isHome: Boolean): Boolean { commandBar = false; return !isHome }
     /** Page answered the toggle with "on" / "off" / "none". @return false when no article was found. */
-    fun readerResult(r: String?): Boolean { reader = r == "\"on\""; return r != "\"none\"" }
+    fun readerResult(r: String?): Boolean { reader = PageApi.readerIsOn(r); return PageApi.readerFoundArticle(r) }
 
     fun zoom(delta: Int): Int { zoomPercent = (zoomPercent + delta).coerceIn(MIN_ZOOM, MAX_ZOOM); return zoomPercent }
 

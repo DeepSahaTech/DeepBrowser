@@ -6,14 +6,13 @@ import android.webkit.WebChromeClient
 import android.widget.FrameLayout
 
 /** Adapter: shows a page's fullscreen video view above everything in [container]. */
-class FullscreenHost(private val container: FrameLayout, private val onExit: () -> Unit) {
+class FullscreenHost(private val container: FrameLayout, private val onExit: () -> Unit) : FullscreenSurface {
     private var view: View? = null
     private var callback: WebChromeClient.CustomViewCallback? = null
-    val active: Boolean get() = view != null
-    /** The page's fullscreen view: it sits above the WebView, so touches for the player must go to it. */
-    val shown: View? get() = view
+    override val active: Boolean get() = view != null
+    override val shown: View? get() = view
 
-    fun show(v: View, cb: WebChromeClient.CustomViewCallback) {
+    override fun show(v: View, cb: WebChromeClient.CustomViewCallback) {
         if (view != null) { cb.onCustomViewHidden(); return }
         view = v; callback = cb
         // The video surface is punched through the window: nothing opaque may sit behind or around it.
@@ -23,7 +22,7 @@ class FullscreenHost(private val container: FrameLayout, private val onExit: () 
         container.addView(v, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
-    fun exit() {
+    override fun exit() {
         val v = view ?: return
         container.removeView(v)
         (0 until container.childCount).forEach { container.getChildAt(it).alpha = 1f }

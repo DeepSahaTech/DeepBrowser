@@ -15,8 +15,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.deepbrowser.tv.data.Bookmarks
-import com.deepbrowser.tv.data.History
+import com.deepbrowser.tv.data.Library
 import com.deepbrowser.tv.data.NavMode
 import com.deepbrowser.tv.data.Page
 import com.deepbrowser.tv.data.PrefsStore
@@ -28,8 +27,9 @@ import com.deepbrowser.tv.player.MediaUrl
 import com.deepbrowser.tv.player.PlayerActivity
 
 /**
- * Translates, does not decide: remote keys -> [KeyRouter] -> [ChromeState]/Android calls; page events -> tab state.
- * UI-mode state lives in [ChromeState], numbers in [Viewport], tab state in [TabSession], focus scoring in [Spatial];
+ * Translates, does not decide: remote keys -> [KeySequencer] -> [KeyEffects] here; page events -> [PageLifecycle]/tab state.
+ * UI-mode state lives in [ChromeState], numbers in [Viewport], tab state in [TabSession], focus scoring in [Spatial],
+ * fullscreen in [FullscreenSession], the ad-filter update flow in [FilterUpdater] and bookmarks/history in [Library];
  * the WebView itself is behind the [TabView] seam ([WebTab]). Views are built lazily (see [warmUp]).
  */
 class BrowserController(
@@ -45,35 +45,33 @@ class BrowserController(
     private val filterChoice = FilterSourceChoice(store)
     private val adFilter = AdFilter(HttpFileSource(context.filesDir, url = { filterChoice.url }))
     private val settings = Settings(store)
-    private val bookmarkStore = Bookmarks(store)
-    private val historyStore = History(store)
+    private val library = Library(store)
     private val uas = UserAgents(context)
     private val cursor = CursorState(viewport.width.toFloat(), viewport.height.toFloat())
-    private val fullscreen = FullscreenHost(overlayContainer) { tab.view.focus() }
+    private val fullscreen = FullscreenSession(FullscreenHost(overlayContainer) { tab.view.focus() }, chrome, HandlerScheduler(main))
     private val pointer = PointerInjector({ fullscreen.shown ?: tab.view.hostView }, cursor, main)
+    private val filters = FilterUpdater(
+        adFilter, filterChoice,
+        background = { work -> Thread(work).apply { isDaemon = true }.start() },
+        onMain = { main.post(it) },
+        onUpdated = { if (adState.enabled && !isHome) tab.view.eval(adFilter.injection()) },
+    )
 
     var uaMode by mutableStateOf(settings.ua); private set
 
     private val events = object : PageEvents {
-        override fun started(v: TabView, url: String?) {
-            if (isActive(v)) { tab.progress = 5; nav.reset(); viewport.page(url); chrome.documentChanged(); applyScale() }
-            inject(v)
-        }
+        override fun started(v: TabView, url: String?) = lifecycle.documentStarted(v, url)
         override fun loaded(v: TabView) = inject(v)
         override fun progress(v: TabView, percent: Int) { if (isActive(v)) tab.progress = percent }
         override fun title(v: TabView, title: String) {
             if (!isActive(v)) return
             tab.title = title
-            historyStore.setTitle(currentUrl, title); historyItems = historyStore.items
+            library.retitle(currentUrl, title)
         }
         override fun visited(v: TabView, url: String?, reload: Boolean) {
             if (!isActive(v)) return
-            if (chrome.reader) exitReader() // SPA navigation keeps the document, so the overlay must be closed explicitly
-            if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
-                tab.url = url
-                if (!reload) { historyStore.add(url); historyItems = historyStore.items }
-            }
-            session.syncNav()
+            val web = lifecycle.visited(url)
+            if (web != null && !reload) library.visit(web)
         }
         override fun shouldBlock(url: String, host: String?): Boolean {
             val blocked = adState.enabled && adFilter.shouldBlock(url, host)
@@ -85,6 +83,7 @@ class BrowserController(
     }
 
     private val session = TabSession(::createTab)
+    private val lifecycle = PageLifecycle(session, chrome, viewport, resetFocus = { nav.reset() }, inject = ::inject, closeReader = ::exitReader)
     val tabs: List<Tab> get() = session.tabs
     val activeTab: Int get() = session.activeIndex
     private val tab: Tab get() = session.active
@@ -103,8 +102,9 @@ class BrowserController(
     var commandBarVisible by chrome::commandBar
     var infoVisible by chrome::info
     var panel by chrome::panel
-    var cursorEnabled by chrome::cursorMode
-    val navMode: NavMode get() = if (cursorEnabled) NavMode.POINTER else NavMode.FOCUS
+    val navMode: NavMode get() = chrome.navMode
+    val ringVisible: Boolean get() = chrome.ringVisible
+    val pointerVisible: Boolean get() = chrome.pointerVisible
     val focusOwner: FocusOwner get() = chrome.owner(isHome)
     val readerOn: Boolean get() = chrome.reader
     val zoomPercent: Int get() = chrome.zoomPercent
@@ -112,28 +112,28 @@ class BrowserController(
     var companionHelp by mutableStateOf(false)
     var focusRect by mutableStateOf<Rect?>(null); private set
     var adBlockOn by mutableStateOf(adState.enabled); private set
-    var bookmarks by mutableStateOf(bookmarkStore.items); private set
-    var historyItems by mutableStateOf(historyStore.items); private set
+    val bookmarks: List<Page> get() = library.bookmarks
+    val historyItems: List<Page> get() = library.history
     var cursorPos by mutableStateOf(Offset.Zero); private set
 
-    val isHome: Boolean get() = currentUrl == UrlResolver.HOME
-    val isBookmarked: Boolean get() = bookmarks.any { it.url == currentUrl }
-    val filterRules: Int get() = filterStatus.rules
-    var filterStatus by mutableStateOf(FilterStatus(null, 0, null)); private set
-    var filterUpdating by mutableStateOf(false); private set
-    var filterSource by mutableStateOf(filterChoice.label); private set
-    var filterLinkError by mutableStateOf<String?>(null)
+    val isHome: Boolean get() = lifecycle.isHome
+    val isBookmarked: Boolean get() = library.isBookmarked(currentUrl)
+    val filterRules: Int get() = filters.status.rules
+    val filterStatus: FilterStatus get() = filters.status
+    val filterUpdating: Boolean get() = filters.updating
+    val filterSource: String get() = filters.source
+    val filterLinkError: String? get() = filters.linkError
 
     /** True once the first frame is drawn and the WebView has been built. */
     var warmed = false; private set
     var onWarm: (() -> Unit)? = null
 
-    private val nav = FocusNav(
+    private val nav: FocusNav = FocusNav(
         main = main,
         evalJs = { js -> tab.view.eval(js) },
         viewWidth = { viewport.width },
         onRing = { focusRect = it },
-        onSeek = { fwd -> seekHeld(fwd) },
+        onSeek = { fwd -> keys.seekHeld(fwd) },
     )
     private var cursorFrameOn = false
     private var lastFrameNs = 0L
@@ -152,25 +152,21 @@ class BrowserController(
         cursorFrameOn = true; lastFrameNs = 0L
         android.view.Choreographer.getInstance().postFrameCallback(cursorFrame)
     }
-    private var releasedKey: Key? = null
-    /** Pointer speed multiplier (Settings). */
+    /** Pointer speed multiplier (Settings clamps it). */
     var pointerSpeed: Float
         get() = cursor.speedScale
-        set(v) { cursor.speedScale = v.coerceIn(0.5f, 2.5f); settings.pointerSpeed = cursor.speedScale }
-
-    private val okLongPress = Runnable { chrome.okLongFired() }
-    private val fsControlsOff = Runnable { chrome.hideControls() }
+        set(v) { settings.pointerSpeed = v; cursor.speedScale = settings.pointerSpeed }
 
     init {
-        Thread { adFilter.refresh(); val s = adFilter.status(); main.post { filterStatus = s } }.apply { isDaemon = true }.start()
+        filters.start()
         cursorPos = Offset(cursor.x, cursor.y)
-        cursorEnabled = settings.nav == NavMode.POINTER
+        chrome.navMode = settings.nav
         cursor.speedScale = settings.pointerSpeed
     }
 
     /** Switch between remote focus and the mouse pointer for web pages; persisted, with a brief on-screen label. */
     fun setNavMode(m: NavMode) {
-        cursorEnabled = m == NavMode.POINTER; settings.nav = m
+        chrome.navMode = m; settings.nav = m
         android.widget.Toast.makeText(context, if (m == NavMode.POINTER) "Mouse pointer on" else "Remote focus on", android.widget.Toast.LENGTH_SHORT).show()
     }
 
@@ -203,8 +199,6 @@ class BrowserController(
         if (adState.enabled) v.eval(adFilter.injection())
     }
 
-    private fun applyScale() { viewport.initialScale()?.let { tab.view.applyScale(it) } }
-
     /** Called by the UI after the first frames: builds the WebView off the critical path. */
     fun warmUp() {
         if (warmed) return
@@ -217,10 +211,10 @@ class BrowserController(
 
     fun loadInput(input: String) {
         val url = UrlResolver.resolve(input)
-        chrome.loadRequested()
+        lifecycle.loadRequested()
         if (url == UrlResolver.HOME) { goHome(); return }
         if (MediaUrl.isDirectMedia(url)) { openPlayer(url, if (isHome) null else currentUrl); return }
-        tab.url = url; chrome.documentChanged()
+        lifecycle.navigating(url)
         tab.view.load(url)
     }
 
@@ -229,7 +223,7 @@ class BrowserController(
         PlayerActivity.open(context, url, referer, CookieManager.getInstance().getCookie(url), tab.view.userAgent ?: uas.of(uaMode))
     }
 
-    fun goHome() { tab.url = UrlResolver.HOME; chrome.wentHome() }
+    fun goHome() = lifecycle.wentHome()
     fun reload() { chrome.commandBar = false; tab.view.reload() }
     fun goBack() { if (tab.view.canGoBack) tab.view.goBack() else goHome() }
     fun goForward() = tab.view.goForward()
@@ -247,47 +241,20 @@ class BrowserController(
         if (!isHome) tab.view.reload()
     }
 
-    /** Manual or link-change update: download off the main thread, then show the result and re-inject when the list changed. */
-    fun updateFilterList() {
-        if (filterUpdating) return
-        filterUpdating = true
-        Thread {
-            val r = adFilter.update(); val s = adFilter.status()
-            main.post {
-                filterUpdating = false; filterStatus = s
-                if (filterRelink) { filterRelink = false; updateFilterList() } // the link changed mid-update: fetch the new one
-                if (r is UpdateResult.Updated && adState.enabled && !isHome) tab.view.eval(adFilter.injection())
-            }
-        }.apply { isDaemon = true }.start()
-    }
-
-    private var filterRelink = false
-    private fun updateForNewLink() { if (filterUpdating) filterRelink = true else updateFilterList() }
-
-    /** Use a custom https list link (validated, persisted) and update from it now. False when the link is rejected. */
-    fun setFilterLink(input: String): Boolean {
-        if (!filterChoice.set(input)) { filterLinkError = "Enter a full https:// link"; return false }
-        filterLinkError = null; filterSource = filterChoice.label
-        updateForNewLink()
-        return true
-    }
-
-    fun resetFilterLink() {
-        filterChoice.reset(); filterLinkError = null; filterSource = filterChoice.label
-        updateForNewLink()
-    }
+    fun updateFilterList() = filters.update()
+    fun setFilterLink(input: String): Boolean = filters.setLink(input)
+    fun resetFilterLink() = filters.resetLink()
 
     fun adsBlocked(): Long = adState.totalBlocked()
 
     fun toggleBookmark() {
         if (isHome) return
-        bookmarkStore.toggle(currentUrl, title.ifBlank { UrlResolver.displayHost(currentUrl) })
-        bookmarks = bookmarkStore.items
+        library.toggleBookmark(currentUrl, title.ifBlank { UrlResolver.displayHost(currentUrl) })
     }
 
-    fun removeBookmark(p: Page) { bookmarkStore.toggle(p.url, p.title); bookmarks = bookmarkStore.items }
+    fun removeBookmark(p: Page) { library.toggleBookmark(p.url, p.title) }
 
-    fun clearHistory() { historyStore.clear(); historyItems = historyStore.items }
+    fun clearHistory() = library.clearHistory()
 
     /** Cookies, cache, web storage, form data, back/forward lists and history. Bookmarks and settings are kept. */
     fun clearBrowsingData() {
@@ -301,42 +268,19 @@ class BrowserController(
 
     // ---------------------------------------------------------------- tabs
 
-    fun newTab() {
-        if (tabs.size >= MAX_TABS) return
-        leaveTab(); session.open(); enterTab()
-    }
-
-    fun switchTo(i: Int) {
-        if (i == activeTab) { chrome.closePanel(); return }
-        leaveTab(); session.switchTo(i); enterTab()
-    }
-
-    fun closeTab(i: Int) {
-        val wasActive = i == activeTab
-        if (!session.close(i)) { goHome(); chrome.closePanel(); return }
-        if (wasActive) enterTab()
-    }
-
-    /** The reader overlay lives in the old tab's page: close it before that tab goes to the background. */
-    private fun leaveTab() { if (chrome.reader) exitReader() }
-
-    /** The new active tab is live: re-aim scale/focus at its page. */
-    private fun enterTab() {
-        viewport.page(if (isHome) null else tab.url)
-        nav.reset(); applyScale(); chrome.tabEntered()
-        if (!tab.view.ready || isHome) return
-        inject(tab.view); tab.view.eval("(window.__dbSnap?window.__dbSnap():0)"); tab.view.focus()
-    }
+    fun newTab() = lifecycle.newTab()
+    fun switchTo(i: Int) = lifecycle.switchTo(i)
+    fun closeTab(i: Int) = lifecycle.closeTab(i)
 
     /** Toggle TV reader mode on the current page; toasts when no article is found. */
     fun toggleReader() {
         if (!chrome.beginReader(isHome)) return
-        tab.view.eval(ReaderMode.SCRIPT + ";window.__dbReader()") { r ->
+        tab.view.eval(PageApi.readerToggle()) { r ->
             if (!chrome.readerResult(r)) android.widget.Toast.makeText(context, "No article found on this page", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun exitReader() { chrome.apply(KeyAction.ExitReader); tab.view.eval("(window.__dbReader&&window.__dbReader())") }
+    private fun exitReader() { chrome.apply(KeyAction.ExitReader); tab.view.eval(PageApi.readerClose()) }
 
     /** Insert [text] into the focused page field (companion "Paste"); appends, no cursor-position insert. */
     fun pasteText(text: String) { tab.view.eval(PageScripts.pasteJs(text)) }
@@ -346,7 +290,7 @@ class BrowserController(
     fun onSizeChanged(w: Int, h: Int) {
         viewport.resize(w, h)
         cursor.resize(w.toFloat(), h.toFloat()); cursorPos = Offset(cursor.x, cursor.y)
-        applyScale()
+        lifecycle.applyScale()
     }
 
     fun onPause() { tab.view.pause(); adState.flush() }
@@ -358,70 +302,35 @@ class BrowserController(
     private fun imeVisible(): Boolean =
         ViewCompat.getRootWindowInsets(overlayContainer)?.isVisible(WindowInsetsCompat.Type.ime()) == true
 
-    /** Adapter: Android key -> [KeyRouter] -> execute. @return true if the key was consumed. */
-    fun handleKey(e: KeyEvent): Boolean {
-        val key = KeyMap.of(e)
-        val fs = fullscreen.active
-        if (chrome.keepsControls(key, fs)) armControlsHide()
-        releasedKey = if (e.action == KeyEvent.ACTION_UP) key else null
-        val state = chrome.keyState(fs, imeVisible(), isHome, viewport.nativeKeys)
-        return execute(KeyRouter.route(KeyIn(key, e.action == KeyEvent.ACTION_DOWN, e.repeatCount), state))
+    /** The Android/page side of every key action; [KeySequencer] decides when each runs. */
+    private val keyEffects: KeyEffects = object : KeyEffects {
+        override fun keyTouched(key: Key) = fullscreen.onKey(key)
+        override fun exitFullscreen() = fullscreen.requestExit { reply -> tab.view.eval(PageApi.menuBack(), reply) }
+        override fun fsReveal() { fullscreen.armHide(); nav.reveal() }
+        override fun move(dir: Dir) { nav.move(dir) }
+        override fun fsOk() = if (nav.sliderFocused) toggleVideo() else smartOk()
+        override fun seek(seconds: Int) = tab.view.eval(PageApi.seekBy(seconds))
+        override fun toggleVideo() = tab.view.eval(PageApi.togglePlay())
+        override fun exitReader() = this@BrowserController.exitReader()
+        override fun readerScroll(delta: Int) = tab.view.eval(PageApi.readerScroll(delta))
+        override fun back(native: Boolean) =
+            if (native) goBack() else tab.view.eval(PageApi.back()) { r -> if (!PageApi.wasClosed(r)) goBack() }
+        override fun movePointer(dir: Dir) { cursor.hold(dir, true); startCursorFrames() }
+        override fun releasePointer(dir: Dir?) { if (dir != null) cursor.hold(dir, false) else cursor.releaseAll() }
+        override fun clickPointer() { pointer.click() }
+        override fun smartOk() = this@BrowserController.smartOk()
+        override fun page(down: Boolean) = tab.view.page(down)
     }
 
-    private fun armControlsHide() { main.removeCallbacks(fsControlsOff); main.postDelayed(fsControlsOff, ChromeState.FS_CONTROLS_MS) }
+    private val keys: KeySequencer = KeySequencer(
+        chrome, keyEffects, HandlerScheduler(main), android.os.SystemClock::uptimeMillis,
+        context = { KeyContext(fullscreen.active, imeVisible(), isHome, viewport.nativeKeys) },
+    )
 
-    private fun execute(a: KeyAction): Boolean {
-        chrome.apply(a)
-        when (a) {
-            KeyAction.Pass -> return false
-            KeyAction.Consume, KeyAction.CloseOverlays, KeyAction.OpenCommandBar -> {}
-            KeyAction.ExitFullscreen -> tab.view.eval("(window.__dbMenuBack&&window.__dbMenuBack()?'closed':'none')") { r -> if (r != "\"closed\"") fullscreen.exit() }
-            KeyAction.FsReveal -> { armControlsHide(); nav.reveal() }
-            is KeyAction.FsNav -> smartNav(a.dir.js)
-            KeyAction.FsOk -> if (nav.sliderFocused) videoCommand("v.paused?v.play():v.pause()") else smartNav("ok")
-            is KeyAction.Seek -> videoCommand(
-                if (a.seconds < 0) "v.currentTime=Math.max(0,v.currentTime${a.seconds})" else "v.currentTime=v.currentTime+${a.seconds}")
-            KeyAction.VideoToggle -> videoCommand("v.paused?v.play():v.pause()")
-            KeyAction.ExitReader -> exitReader()
-            is KeyAction.ReaderScroll -> tab.view.eval("window.__dbReaderScroll&&window.__dbReaderScroll(${a.delta})")
-            is KeyAction.BackPage ->
-                if (a.native) goBack()
-                else tab.view.eval("(window.__dbBack?window.__dbBack():'none')") { r -> if (r != "\"closed\"") goBack() }
-            is KeyAction.Nav -> smartNav(a.dir.js)
-            is KeyAction.MoveCursor -> { cursor.hold(a.dir, true); startCursorFrames() }
-            KeyAction.ReleaseCursor -> when (releasedKey) {
-                Key.UP -> cursor.hold(Dir.UP, false); Key.DOWN -> cursor.hold(Dir.DOWN, false)
-                Key.LEFT -> cursor.hold(Dir.LEFT, false); Key.RIGHT -> cursor.hold(Dir.RIGHT, false)
-                else -> cursor.releaseAll()
-            }
-            KeyAction.OkDown -> main.postDelayed(okLongPress, ChromeState.OK_LONG_MS) // tap on release; holding OK opens the command bar
-            KeyAction.OkUpLong -> main.removeCallbacks(okLongPress)
-            KeyAction.OkUpClick -> { main.removeCallbacks(okLongPress); pointer.click() }
-            KeyAction.OkUpSmart -> { main.removeCallbacks(okLongPress); smartNav("ok") }
-            is KeyAction.Page -> tab.view.page(a.down)
-        }
-        return true
-    }
+    /** Adapter: Android key -> [KeySequencer]. @return true if the key was consumed. */
+    fun handleKey(e: KeyEvent): Boolean =
+        keys.onKey(KeyIn(KeyMap.of(e), e.action == KeyEvent.ACTION_DOWN, e.repeatCount))
 
-    private fun smartNav(dir: String) {
-        when (dir) {
-            // A real touch (not a script click) counts as a user gesture: fullscreen, keyboard and player UIs all work.
-            "ok" -> if (!pointer.tapRing(focusRect)) tab.view.eval("(window.__dbOk?window.__dbOk():'none')")
-            "reveal" -> nav.reveal()
-            else -> nav.move(dir)
-        }
-    }
-
-    private var lastSeekAt = 0L
-    private var seekRun = 0
-    /** Timeline Left/Right: 10 s per press, growing while the key repeats. */
-    private fun seekHeld(forward: Boolean) {
-        val now = android.os.SystemClock.uptimeMillis()
-        seekRun = if (now - lastSeekAt < 500) seekRun + 1 else 0
-        lastSeekAt = now
-        val step = ChromeState.seekStep(seekRun)
-        videoCommand(if (forward) "v.currentTime=v.currentTime+$step" else "v.currentTime=Math.max(0,v.currentTime-$step)")
-    }
-
-    private fun videoCommand(action: String) { tab.view.eval(PageScripts.videoJs(action)) }
+    /** A real touch (not a script click) counts as a user gesture: fullscreen, keyboard and player UIs all work. */
+    private fun smartOk() { if (!pointer.tapRing(focusRect)) tab.view.eval(PageApi.ok()) }
 }

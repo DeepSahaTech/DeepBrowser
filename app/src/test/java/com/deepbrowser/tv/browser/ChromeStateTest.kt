@@ -1,5 +1,6 @@
 package com.deepbrowser.tv.browser
 
+import com.deepbrowser.tv.data.NavMode
 import com.deepbrowser.tv.data.UaMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,7 +48,7 @@ class ChromeStateTest {
     }
 
     @Test fun imeIgnoredInFullscreenAndKeyStateReflectsModes() {
-        c.cursorMode = true; c.readerResult("\"on\"")
+        c.navMode = NavMode.POINTER; c.readerResult("\"on\"")
         val s = c.keyState(fullscreen = true, imeVisible = true, isHome = false, nativeKeys = true)
         assertFalse(s.imeVisible); assertTrue(s.cursorMode); assertTrue(s.readerOn); assertTrue(s.nativeKeys)
     }

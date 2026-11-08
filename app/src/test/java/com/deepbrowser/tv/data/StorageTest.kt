@@ -67,4 +67,12 @@ class StorageTest {
         val s = MapStore(); s.write("settings", """{"ua":"TV","nav":"bogus"}""")
         assertEquals(NavMode.FOCUS, Settings(s).nav)
     }
+
+    @Test fun pointerSpeedIsClampedOnSetAndOnLoad() {
+        val s = MapStore()
+        Settings(s).pointerSpeed = 9f
+        assertEquals(2.5f, Settings(s).pointerSpeed, 0f)
+        s.write("settings", """{"ptr":0.1}""")
+        assertEquals(0.5f, Settings(s).pointerSpeed, 0f)
+    }
 }

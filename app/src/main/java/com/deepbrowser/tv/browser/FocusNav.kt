@@ -21,7 +21,9 @@ class FocusNav(
     private var viewH = Viewport.SCREEN_H.toFloat()
     var cssWidth = Viewport.LAYOUT_WIDTH.toFloat(); private set
     private var curId = -1
-    private var pendingDir: String? = null
+    /** A move waiting for the page: the first snapshot (after [reveal]: the one with the controls) triggers it. */
+    private sealed interface Pending { object Init : Pending; class Move(val dir: Dir) : Pending }
+    private var pending: Pending? = null
     private var carousels = emptyList<Bounds>()
     private var anchorX = Float.NaN   // keeps your column while moving up/down through rows
     private var anchorFromCur = false
@@ -34,7 +36,7 @@ class FocusNav(
     /** The player's timeline is selected: Left/Right seek, OK toggles play. */
     val sliderFocused: Boolean get() = items.firstOrNull { it.id == curId }?.slider == true
 
-    fun reset() { items = emptyList(); curId = -1; pendingDir = null; anchorX = Float.NaN; onRing(null) }
+    fun reset() { items = emptyList(); curId = -1; pending = null; anchorX = Float.NaN; onRing(null) }
 
     fun onSnapshot(json: String) {
         val snap = SnapshotParser.parse(json, viewWidth()) ?: return
@@ -50,7 +52,11 @@ class FocusNav(
             if (anchorFromCur) anchorX = it.cx
         } ?: onRing(null)
         // after a reveal the player's controls arrive in a later snapshot: a lone element (the video) is not the answer yet
-        pendingDir?.let { if (it == "init" && items.size < 2) return; pendingDir = null; move(it, fromSnapshot = true) }
+        when (val p = pending) {
+            Pending.Init -> if (items.size >= 2) { pending = null; pickInitial() }
+            is Pending.Move -> { pending = null; move(p.dir, fromSnapshot = true) }
+            null -> {}
+        }
     }
 
     /** Scroll tracking: the focused element moved because the page scrolled. */
@@ -59,25 +65,27 @@ class FocusNav(
         onRing(Viewport.toView(x, y, w, h, Viewport.factor(viewWidth(), cssWidth)).rect())
     }
 
-    fun move(dir: String, fromSnapshot: Boolean = false): Boolean {
-        if (items.isEmpty()) { if (!fromSnapshot) { pendingDir = dir; evalJs("window.__dbSnap&&window.__dbSnap()") }; return true }
+    fun move(dir: Dir, fromSnapshot: Boolean = false): Boolean {
+        if (items.isEmpty()) { if (!fromSnapshot) { pending = Pending.Move(dir); evalJs(PageApi.snap()) }; return true }
         val cur = items.firstOrNull { it.id == curId }
-        val d = Dir.parse(dir) // null for "init" (after reveal): re-pick the first target
-        if (cur == null || d == null) { Spatial.initial(items, viewH)?.let { select(it, dir) }; return true }
-        if (cur.slider && (d == Dir.LEFT || d == Dir.RIGHT)) { onSeek(d == Dir.RIGHT); return true }
-        if (d == Dir.UP || d == Dir.DOWN) { if (anchorX.isNaN()) anchorX = cur.cx }
-        when (val r = Spatial.decide(items, cur, d, anchorX, carousels, viewWidth())) {
+        if (cur == null) { Spatial.initial(items, viewH)?.let { select(it, dir) }; return true }
+        if (cur.slider && (dir == Dir.LEFT || dir == Dir.RIGHT)) { onSeek(dir == Dir.RIGHT); return true }
+        if (dir == Dir.UP || dir == Dir.DOWN) { if (anchorX.isNaN()) anchorX = cur.cx }
+        when (val r = Spatial.decide(items, cur, dir, anchorX, carousels, viewWidth())) {
             is NavResult.Move -> select(r.item, dir)
-            NavResult.CarouselSwitch -> evalJs("window.__dbCarousel&&window.__dbCarousel('$dir')")
-            NavResult.None -> if (!fromSnapshot) { pendingDir = dir; evalJs("window.__dbScroll&&window.__dbScroll('$dir')") }
+            NavResult.CarouselSwitch -> evalJs(PageApi.carousel(dir))
+            NavResult.None -> if (!fromSnapshot) { pending = Pending.Move(dir); evalJs(PageApi.scroll(dir)) }
         }
         return true
     }
 
-    fun reveal() { evalJs("window.__dbReveal&&window.__dbReveal()"); pendingDir = "init" }
+    fun reveal() { evalJs(PageApi.reveal()); pending = Pending.Init }
 
-    private fun select(it: NavItem, dir: String?) {
-        if (dir == "left" || dir == "right") { anchorX = it.cx; anchorFromCur = true } else if (dir == "up" || dir == "down") { anchorFromCur = false; if (anchorX.isNaN() || anchorX < it.box.l || anchorX > it.box.r) anchorX = it.cx }
+    /** After a reveal: re-pick the first target. */
+    private fun pickInitial() { Spatial.initial(items, viewH)?.let { select(it, null) } }
+
+    private fun select(it: NavItem, dir: Dir?) {
+        if (dir == Dir.LEFT || dir == Dir.RIGHT) { anchorX = it.cx; anchorFromCur = true } else if (dir == Dir.UP || dir == Dir.DOWN) { anchorFromCur = false; if (anchorX.isNaN() || anchorX < it.box.l || anchorX > it.box.r) anchorX = it.cx }
         curId = it.id
         onRing(it.box.rect())
         queuedId = it.id
@@ -87,6 +95,6 @@ class FocusNav(
 
     private fun sendSel() {
         lastSend = SystemClock.uptimeMillis()
-        if (queuedId >= 0) evalJs("window.__dbSel&&window.__dbSel($queuedId)")
+        if (queuedId >= 0) evalJs(PageApi.select(queuedId))
     }
 }
