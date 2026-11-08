@@ -54,4 +54,17 @@ class StorageTest {
         val b = Settings(s)
         assertEquals(UaMode.DESKTOP, b.ua)
     }
+
+    @Test fun navigationModeDefaultsToFocusAndPersistsAlongsideUa() {
+        val s = MapStore()
+        assertEquals(NavMode.FOCUS, Settings(s).nav)
+        Settings(s).apply { ua = UaMode.MOBILE; nav = NavMode.POINTER }
+        val r = Settings(s)
+        assertEquals(NavMode.POINTER, r.nav); assertEquals(UaMode.MOBILE, r.ua)
+        r.nav = r.nav.toggle(); assertEquals(NavMode.FOCUS, Settings(s).nav); assertEquals(UaMode.MOBILE, Settings(s).ua)
+    }
+    @Test fun unknownStoredNavigationModeFallsBackToFocus() {
+        val s = MapStore(); s.write("settings", """{"ua":"TV","nav":"bogus"}""")
+        assertEquals(NavMode.FOCUS, Settings(s).nav)
+    }
 }

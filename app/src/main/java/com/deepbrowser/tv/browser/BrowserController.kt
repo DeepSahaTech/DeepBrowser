@@ -17,6 +17,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.deepbrowser.tv.data.Bookmarks
 import com.deepbrowser.tv.data.History
+import com.deepbrowser.tv.data.NavMode
 import com.deepbrowser.tv.data.Page
 import com.deepbrowser.tv.data.PrefsStore
 import com.deepbrowser.tv.data.Settings
@@ -36,6 +37,7 @@ class BrowserController(
     private val overlayContainer: FrameLayout,
 ) {
     private val chrome = ChromeState()
+    private var pageOwns = true // before [session]: the first tab is built with it
     private val viewport = Viewport()
     private val main = Handler(Looper.getMainLooper())
     private val store = PrefsStore(context)
@@ -102,6 +104,8 @@ class BrowserController(
     var infoVisible by chrome::info
     var panel by chrome::panel
     var cursorEnabled by chrome::cursorMode
+    val navMode: NavMode get() = if (cursorEnabled) NavMode.POINTER else NavMode.FOCUS
+    val focusOwner: FocusOwner get() = chrome.owner(isHome)
     val readerOn: Boolean get() = chrome.reader
     val zoomPercent: Int get() = chrome.zoomPercent
     var companionUrl by mutableStateOf<String?>(null)
@@ -136,13 +140,29 @@ class BrowserController(
     init {
         Thread { adFilter.refresh(); val s = adFilter.status(); main.post { filterStatus = s } }.apply { isDaemon = true }.start()
         cursorPos = Offset(cursor.x, cursor.y)
+        cursorEnabled = settings.nav == NavMode.POINTER
+    }
+
+    /** Switch between remote focus and the mouse pointer for web pages; persisted, with a brief on-screen label. */
+    fun setNavMode(m: NavMode) {
+        cursorEnabled = m == NavMode.POINTER; settings.nav = m
+        android.widget.Toast.makeText(context, if (m == NavMode.POINTER) "Mouse pointer on" else "Remote focus on", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    fun toggleNavMode() = setNavMode(navMode.toggle())
+
+    /** The owning layer changed: only the page owner keeps the WebView focusable (and gives it Android focus back). */
+    fun onOwnerChanged(o: FocusOwner) {
+        pageOwns = o == FocusOwner.PAGE
+        tabs.forEach { it.view.setFocusable(pageOwns) }
+        if (pageOwns && tab.view.ready) tab.view.focus()
     }
 
     // ---------------------------------------------------------------- tab views
 
     private fun createTab(): TabView =
         WebTab(context, fullscreen, events) { TabConfig(uas.of(uaMode), chrome.zoomPercent, viewport.initialScale()) }
-            .also { it.attachBridge(bridgeFor(it)) }
+            .also { it.attachBridge(bridgeFor(it)); it.setFocusable(pageOwns) }
 
     private fun isActive(v: TabView) = v === tab.view
 

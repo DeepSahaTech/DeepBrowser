@@ -21,6 +21,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalView
+import com.deepbrowser.tv.browser.FocusOwner
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalDensity
@@ -45,6 +49,13 @@ fun BrowserScreen(c: BrowserController) {
         withFrameNanos { }; withFrameNanos { }
         c.warmUp()
     }
+    val owner = c.focusOwner
+    val homeLast = remember { mutableStateOf("address") }
+    val host = LocalView.current
+    LaunchedEffect(owner, c.webReady) { // one owner at a time: the page gets Android focus only when it owns the remote
+        c.onOwnerChanged(owner)
+        if (owner.isCompose) host.requestFocus()
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -67,13 +78,14 @@ fun BrowserScreen(c: BrowserController) {
         }
 
         if (c.isHome) {
-            HomeScreen(
+            if (owner == FocusOwner.HOME) HomeScreen(
+                last = homeLast,
                 bookmarks = c.bookmarks,
                 onOpen = c::loadInput,
                 onAddress = { c.commandBarVisible = true },
                 onInfo = { c.infoVisible = true },
                 onPanel = c::openPanel,
-            )
+            ) else Box(Modifier.fillMaxSize().background(backdropBrush())) // a layer above owns the remote: Home stays out of the focus tree
         }
 
         val ring = c.focusRect

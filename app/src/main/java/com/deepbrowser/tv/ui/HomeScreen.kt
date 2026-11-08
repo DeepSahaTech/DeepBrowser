@@ -20,11 +20,13 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -42,15 +44,22 @@ val defaultTiles = listOf(
 )
 
 @Composable
-fun HomeScreen(bookmarks: List<Page>, onOpen: (String) -> Unit, onAddress: () -> Unit, onInfo: () -> Unit, onPanel: (Panel) -> Unit) {
-    val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+fun HomeScreen(
+    last: MutableState<String>, // survives this screen leaving composition: the tile focused last gets focus back
+    bookmarks: List<Page>, onOpen: (String) -> Unit, onAddress: () -> Unit, onInfo: () -> Unit, onPanel: (Panel) -> Unit,
+) {
+    val start = remember { FocusRequester() }
+    val initial = remember { last.value }
+    LaunchedEffect(Unit) { start.requestWhenReady() }
+    fun Modifier.slot(id: String): Modifier =
+        onFocusChanged { if (it.isFocused) last.value = id }.then(if (id == initial) Modifier.focusRequester(start) else Modifier)
 
     Column(
         Modifier
             .fillMaxSize()
             .background(backdropBrush())
-            .padding(overscanPadding()),
+            .padding(overscanPadding())
+            .restoringFocus(start),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(24.dp).background(Sem.accent, CircleShape))
@@ -62,7 +71,7 @@ fun HomeScreen(bookmarks: List<Page>, onOpen: (String) -> Unit, onAddress: () ->
         // Address pill: opens the command bar
         GlassButton(
             onClick = onAddress,
-            modifier = Modifier.fillMaxWidth().focusRequester(first),
+            modifier = Modifier.fillMaxWidth().slot("address"),
             radius = Cmp.barRadius,
             focusedScale = 1.04f,
             container = Cmp.barContainer,
@@ -76,7 +85,7 @@ fun HomeScreen(bookmarks: List<Page>, onOpen: (String) -> Unit, onAddress: () ->
         Spacer(Modifier.height(Cmp.gap))
         Row(horizontalArrangement = Arrangement.spacedBy(Cmp.gap)) {
             listOf(Panel.Bookmarks, Panel.History, Panel.Tabs, Panel.Settings).forEach { p ->
-                GlassButton(onClick = { onPanel(p) }) { Text(p.title, fontSize = Cmp.body, color = Sem.onSurface, maxLines = 1) }
+                GlassButton(onClick = { onPanel(p) }, modifier = Modifier.slot("panel:${p.name}")) { Text(p.title, fontSize = Cmp.body, color = Sem.onSurface, maxLines = 1) }
             }
         }
         Spacer(Modifier.height(Cmp.gap))
@@ -90,7 +99,7 @@ fun HomeScreen(bookmarks: List<Page>, onOpen: (String) -> Unit, onAddress: () ->
             contentPadding = PaddingValues(bottom = Cmp.gap, top = 12.dp, start = 12.dp, end = 12.dp),
         ) {
             items(defaultTiles, span = { t -> GridItemSpan(if (t.featured) 2 else 1) }) { tile ->
-                GlassButton(onClick = { onOpen(tile.url) }, modifier = Modifier.fillMaxWidth(), radius = Cmp.tileRadius, container = Cmp.tileContainer, focusedContainer = Cmp.tileFocused,
+                GlassButton(onClick = { onOpen(tile.url) }, modifier = Modifier.fillMaxWidth().slot("tile:${tile.url}"), radius = Cmp.tileRadius, container = Cmp.tileContainer, focusedContainer = Cmp.tileFocused,
                     contentPadding = PaddingValues(0.dp)) {
                     Column(
                         Modifier.fillMaxWidth().heightIn(min = Cmp.tileMinHeight).padding(vertical = 20.dp),
@@ -107,7 +116,7 @@ fun HomeScreen(bookmarks: List<Page>, onOpen: (String) -> Unit, onAddress: () ->
                 }
             }
             items(bookmarks) { b ->
-                GlassButton(onClick = { onOpen(b.url) }, modifier = Modifier.fillMaxWidth(), radius = Cmp.tileRadius, container = Cmp.tileContainer, focusedContainer = Cmp.tileFocused,
+                GlassButton(onClick = { onOpen(b.url) }, modifier = Modifier.fillMaxWidth().slot("bm:${b.url}"), radius = Cmp.tileRadius, container = Cmp.tileContainer, focusedContainer = Cmp.tileFocused,
                     contentPadding = PaddingValues(0.dp)) {
                     Column(
                         Modifier.fillMaxWidth().heightIn(min = Cmp.tileMinHeight).padding(vertical = 20.dp, horizontal = 12.dp),
@@ -124,7 +133,7 @@ fun HomeScreen(bookmarks: List<Page>, onOpen: (String) -> Unit, onAddress: () ->
                 }
             }
             item {
-                GlassButton(onClick = onInfo, modifier = Modifier.fillMaxWidth(), radius = Cmp.tileRadius, container = Cmp.tileContainer, focusedContainer = Cmp.tileFocused,
+                GlassButton(onClick = onInfo, modifier = Modifier.fillMaxWidth().slot("info"), radius = Cmp.tileRadius, container = Cmp.tileContainer, focusedContainer = Cmp.tileFocused,
                     contentPadding = PaddingValues(0.dp)) {
                     Column(
                         Modifier.fillMaxWidth().heightIn(min = Cmp.tileMinHeight).padding(vertical = 20.dp),

@@ -54,6 +54,8 @@ interface TabView {
     fun attachBridge(bridge: PageBridge)
     fun page(down: Boolean)
     fun focus()
+    /** Out of the focus tree while a native layer owns the remote (also drops Android focus). */
+    fun setFocusable(on: Boolean) {}
     fun pause()
     fun resume()
     fun destroy()

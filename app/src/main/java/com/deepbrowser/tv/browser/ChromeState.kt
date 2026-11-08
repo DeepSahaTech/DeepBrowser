@@ -21,6 +21,8 @@ class ChromeState {
 
     val overlayOpen: Boolean get() = commandBar || info || panel != null
 
+    fun owner(isHome: Boolean) = FocusOwner.of(panel != null, commandBar, info, isHome)
+
     fun keyState(fullscreen: Boolean, imeVisible: Boolean, isHome: Boolean, nativeKeys: Boolean) = KeyState(
         fullscreen = fullscreen, fsControls = fsControls, imeVisible = !fullscreen && imeVisible,
         overlayOpen = overlayOpen, isHome = isHome, readerOn = reader,
