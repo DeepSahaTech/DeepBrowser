@@ -71,8 +71,13 @@ class KeyRouterTest {
     @Test fun fullscreenSeekAndReveal() {
         val s = KeyState(fullscreen = true)
         assertEquals(Seek(-10), r(down(Key.LEFT), s)); assertEquals(Seek(10), r(down(Key.RIGHT), s))
-        assertEquals(FsReveal, r(down(Key.UP), s)); assertEquals(Pass, r(up(Key.UP), s))
+        assertEquals(FsReveal, r(down(Key.UP), s)); assertEquals(Consume, r(up(Key.UP), s))
     }
+    @Test fun fullscreenKeyReleasesNeverReachThePagePlayer() {
+        val s = KeyState(fullscreen = true)
+        for (k in listOf(Key.LEFT, Key.RIGHT, Key.UP, Key.DOWN, Key.OK)) assertEquals(Consume, r(up(k), s))
+    }
+
     @Test fun fullscreenControlsNavigateThePlayerUi() =
         assertEquals(FsNav(Dir.LEFT), r(down(Key.LEFT), KeyState(fullscreen = true, fsControls = true)))
     @Test fun pageKeysScroll() {

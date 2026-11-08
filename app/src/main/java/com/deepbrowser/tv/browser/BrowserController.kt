@@ -133,6 +133,7 @@ class BrowserController(
         evalJs = { js -> tab.view.eval(js) },
         viewWidth = { viewport.width },
         onRing = { focusRect = it },
+        onSeek = { fwd -> seekHeld(fwd) },
     )
     private var cursorFrameOn = false
     private var lastFrameNs = 0L
@@ -374,10 +375,10 @@ class BrowserController(
         when (a) {
             KeyAction.Pass -> return false
             KeyAction.Consume, KeyAction.CloseOverlays, KeyAction.OpenCommandBar -> {}
-            KeyAction.ExitFullscreen -> fullscreen.exit()
+            KeyAction.ExitFullscreen -> tab.view.eval("(window.__dbMenuBack&&window.__dbMenuBack()?'closed':'none')") { r -> if (r != "\"closed\"") fullscreen.exit() }
             KeyAction.FsReveal -> { armControlsHide(); nav.reveal() }
             is KeyAction.FsNav -> smartNav(a.dir.js)
-            KeyAction.FsOk -> smartNav("ok")
+            KeyAction.FsOk -> if (nav.sliderFocused) videoCommand("v.paused?v.play():v.pause()") else smartNav("ok")
             is KeyAction.Seek -> videoCommand(
                 if (a.seconds < 0) "v.currentTime=Math.max(0,v.currentTime${a.seconds})" else "v.currentTime=v.currentTime+${a.seconds}")
             KeyAction.VideoToggle -> videoCommand("v.paused?v.play():v.pause()")
@@ -409,6 +410,17 @@ class BrowserController(
             "reveal" -> nav.reveal()
             else -> nav.move(dir)
         }
+    }
+
+    private var lastSeekAt = 0L
+    private var seekRun = 0
+    /** Timeline Left/Right: 10 s per press, growing while the key repeats. */
+    private fun seekHeld(forward: Boolean) {
+        val now = android.os.SystemClock.uptimeMillis()
+        seekRun = if (now - lastSeekAt < 500) seekRun + 1 else 0
+        lastSeekAt = now
+        val step = ChromeState.seekStep(seekRun)
+        videoCommand(if (forward) "v.currentTime=v.currentTime+$step" else "v.currentTime=Math.max(0,v.currentTime-$step)")
     }
 
     private fun videoCommand(action: String) { tab.view.eval(PageScripts.videoJs(action)) }

@@ -20,6 +20,7 @@ object SmartNav {
   st.textContent=':fullscreen [data-db-focus],:-webkit-full-screen [data-db-focus]{outline:4px solid #8FB4FF!important;outline-offset:3px!important;border-radius:8px}';
   (document.head||document.documentElement).appendChild(st);
   var SEL='a[href],button,input:not([type=hidden]),select,textarea,summary,[tabindex]:not([tabindex="-1"]),[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[onclick],video,[contenteditable=true],[contenteditable=""]';
+  var prevN=0,menuOpener=null,menuBase=0;
   var cur=null,curId=-1,ids=[],idMap=new WeakMap(),cache=null,dirty=true,timer=0,lastPush=0;
   function fsEl(){return document.fullscreenElement||document.webkitFullscreenElement||null;}
   // Same-origin iframes: their elements join the snapshot with coordinates offset by the frame rect.
@@ -86,7 +87,18 @@ object SmartNav {
     for(i=0;i<g.length;i++){e=g[i];var c=String((e.className&&e.className.baseVal)||e.className||'')+' '+(e.firstElementChild?String(e.firstElementChild.className||''):'');if(/active|current|selected/i.test(c))return i;}
     var wi=0,wm=0;g.forEach(function(x,j){var w=x.getBoundingClientRect().width;if(w>wm){wm=w;wi=j;}});return wi;
   }
-  function isControl(el){var t=el.tagName;if(t==='A'){var tx=(el.innerText||'').trim(),rr=el.getBoundingClientRect();if(tx&&tx.length<=24&&rr.height<=64&&rr.width<=260)return true;}return t==='BUTTON'||t==='INPUT'||t==='SELECT'||t==='TEXTAREA'||t==='VIDEO'||el.getAttribute('role')==='button';}
+  function isControl(el){if(el._dbS)return true;var t=el.tagName;if(t==='A'){var tx=(el.innerText||'').trim(),rr=el.getBoundingClientRect();if(tx&&tx.length<=24&&rr.height<=64&&rr.width<=260)return true;}return t==='BUTTON'||t==='INPUT'||t==='SELECT'||t==='TEXTAREA'||t==='VIDEO'||el.getAttribute('role')==='button';}
+  // the site's timeline is often a plain div: a wide, short, empty bar in the lower part of the fullscreen player
+  function findSlider(fs){
+    var vw=innerWidth,vh=innerHeight,ds=fs.querySelectorAll('[role=slider],div');
+    for(var i=0;i<ds.length&&i<1500;i++){
+      var e=ds[i],r=e.getBoundingClientRect();
+      if(e.getAttribute('role')!=='slider'&&(r.width<vw*0.6||r.height<16||r.height>64||r.top<vh*0.6||(e.innerText||'').trim()||e.querySelector('button,a,input,video,svg')))continue;
+      if(r.width<vw*0.4||!vis(e))continue;
+      e._dbS=1;return e;
+    }
+    return null;
+  }
   function snap(){
     var fs=fsEl(),all;
     if(fs){all=fs.querySelectorAll(SEL);}
@@ -100,6 +112,7 @@ object SmartNav {
       if(Math.min(r.right,vw)-Math.max(r.left,0)<r.width*0.3)continue;
       out.push({el:el,r:r,a:r.width*r.height});
     }
+    if(fs){var sl=findSlider(fs);if(sl){var sr=rect(sl);out.push({el:sl,r:sr,a:sr.width*sr.height});}}
     // pagination dots/dashes and logos are never focus targets; dots become a carousel controller instead
     var byParent=new Map(),kept=[],car=[];
     dotGroups=[];
@@ -133,17 +146,27 @@ object SmartNav {
       out.push({el:g.el,r:r,a:r.width*r.height});
     });
     out=out.filter(function(o){return !out.some(function(p){return p!==o&&o.el.contains(p.el)&&p.a>o.a*0.5&&!isControl(p.el);});});
+    if(fs){
+      var n=out.length;
+      // a burst of new targets right after a control was picked = a player menu opened from it
+      if(prevN>=3&&n>=prevN+3&&cur&&cur.isConnected&&cur.tagName!=='VIDEO'){menuOpener=cur;menuBase=prevN;}
+      else if(menuOpener&&n<=menuBase+1)menuOpener=null;
+      prevN=n;
+    }else prevN=0;
     return {iw:vw,ih:vh,fs:!!fs,car:car,cur:cur&&cur.isConnected?curId:-1,
-      items:out.map(function(o){return [idOf(o.el),Math.round(o.r.left),Math.round(o.r.top),Math.round(o.r.width),Math.round(o.r.height)];})};
+      items:out.map(function(o){return [idOf(o.el),Math.round(o.r.left),Math.round(o.r.top),Math.round(o.r.width),Math.round(o.r.height),o.el._dbS?1:0];})};
   }
   function push(delay){
     if(timer)return;
     var wait=Math.max(delay||0,0);
     timer=setTimeout(function(){timer=0;lastPush=Date.now();try{DBBridge.snap(JSON.stringify(snap()));}catch(e){}},wait);
   }
+  var hx=0;
   function hover(el){
-    ['mouseover','mouseenter','mousemove'].forEach(function(t){
-      try{el.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window}));}catch(e){}
+    var r=el.getBoundingClientRect();hx=(hx+7)%40;
+    var o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2+hx,clientY:r.top+r.height/2+hx};
+    ['mouseover','mouseenter','mousemove','pointermove'].forEach(function(t){
+      try{el.dispatchEvent(t==='pointermove'?new PointerEvent(t,o):new MouseEvent(t,o));}catch(e){}
     });
   }
   var raf=0;
@@ -183,7 +206,15 @@ object SmartNav {
     return 'moved';
   };
   // Back: close what is open (fullscreen, popover/menu/dialog) before leaving the page
+  // a player menu opened from a control bar button: Back closes it (clicks its opener again) before leaving fullscreen
+  window.__dbMenuBack=function(){
+    if(!fsEl()||!menuOpener)return false;
+    var op=menuOpener;menuOpener=null;
+    if(op.isConnected&&snap().items.length>=menuBase+3){try{op.click();}catch(e){}push(150);return true;}
+    return false;
+  };
   window.__dbBack=function(){
+    if(window.__dbMenuBack&&window.__dbMenuBack())return 'closed';
     if(window.__dbUnfake&&window.__dbUnfake())return 'closed';
     if(fsEl()){try{(document.exitFullscreen||document.webkitExitFullscreen).call(document);}catch(e){}return 'closed';}
     var ex=document.querySelector('[aria-expanded="true"]');
@@ -206,11 +237,14 @@ object SmartNav {
     return 'closed';
   };
   window.__dbScroll=function(d){
+    if(fsEl()){push(0);return;}
     var h=innerHeight*0.7,w=innerWidth*0.7;
     if(d==='down')scrollBy({top:h,behavior:'smooth'});else if(d==='up')scrollBy({top:-h,behavior:'smooth'});
     else if(d==='right')scrollBy({left:w,behavior:'smooth'});else if(d==='left')scrollBy({left:-w,behavior:'smooth'});
   };
-  window.__dbReveal=function(){var f=fsEl()||document.querySelector('video');if(f)hover(f);push(0);};
+  // the site draws its controls a moment after the hover: report them once they exist, not before
+  window.__dbReveal=function(){var f=fsEl()||document.querySelector('video');if(f){hover(f);var u=document.elementFromPoint(innerWidth/2,innerHeight/2);if(u&&u!==f)hover(u);setTimeout(function(){hover(f);},120);}setTimeout(function(){push(0);},fsEl()?260:0);};
+  setInterval(function(){if(fsEl())push(0);},500);
   window.__dbSnap=function(){push(0);};
   window.__dbOk=function(){
     if(!cur||!cur.isConnected)return 'none';
@@ -292,9 +326,22 @@ object SmartNav {
       if((v.loop||(v.muted&&v.autoplay))&&!(navigator.userActivation&&navigator.userActivation.isActive)&&(!isFinite(v.duration)||v.duration<180)){v.pause();v.removeAttribute('autoplay');}
     }catch(e){}
   }
+  // The video layer is composited outside the page: a CSS mask on an ancestor hides it and a transform on it draws it in the wrong size.
+  function fixVideo(v){
+    try{
+      if(v.tagName!=='VIDEO'||fsEl())return;
+      if(getComputedStyle(v).transform!=='none')v.style.setProperty('transform','none','important');
+      var a=v.parentElement;
+      for(var d=0;d<8&&a&&a!==document.documentElement;d++,a=a.parentElement){
+        var c=getComputedStyle(a);
+        if((c.webkitMaskImage||c.maskImage||'none')!=='none'){a.style.setProperty('-webkit-mask-image','none','important');a.style.setProperty('mask-image','none','important');}
+      }
+    }catch(e){}
+  }
+  ['loadedmetadata','loadeddata','play'].forEach(function(n){document.addEventListener(n,function(e){fixVideo(e.target);},true);});
   document.addEventListener('play',function(e){freezeBg(e.target);},true);
   document.addEventListener('loadeddata',function(e){freezeBg(e.target);},true);
-  setInterval(function(){document.querySelectorAll('video').forEach(freezeBg);},3000);
+  setInterval(function(){document.querySelectorAll('video').forEach(function(v){fixVideo(v);freezeBg(v);});},2000);
   lazy(document.documentElement);sweep();
   try{new MutationObserver(function(ms){ms.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType===1)lazy(n);});});}).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}
   addEventListener('load',function(){push(300);push(1500);});

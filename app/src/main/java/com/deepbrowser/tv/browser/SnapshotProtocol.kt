@@ -12,7 +12,7 @@ data class Bounds(val l: Float, val t: Float, val r: Float, val b: Float) {
     val h get() = b - t
 }
 
-data class NavItem(val id: Int, val box: Bounds) {
+data class NavItem(val id: Int, val box: Bounds, val slider: Boolean = false) {
     val cx get() = box.cx
     val cy get() = box.cy
 }
@@ -35,7 +35,7 @@ object SnapshotParser {
         val items = ArrayList<NavItem>(arr?.length() ?: 0)
         if (arr != null) for (i in 0 until arr.length()) {
             val a = arr.getJSONArray(i)
-            items.add(NavItem(a.getInt(0), Viewport.toView(a.getDouble(1).toFloat(), a.getDouble(2).toFloat(), a.getDouble(3).toFloat(), a.getDouble(4).toFloat(), s)))
+            items.add(NavItem(a.getInt(0), Viewport.toView(a.getDouble(1).toFloat(), a.getDouble(2).toFloat(), a.getDouble(3).toFloat(), a.getDouble(4).toFloat(), s), a.optInt(5, 0) == 1))
         }
         return Snapshot(iw, o.optDouble("ih", Viewport.DEFAULT_CSS_HEIGHT.toDouble()).toFloat() * s, carousels, items, o.optInt("cur", -1))
     }

@@ -64,4 +64,9 @@ class ChromeStateTest {
         assertTrue(UrlResolver.isLoadableScheme("HTTPS")); assertTrue(UrlResolver.isLoadableScheme("about"))
         assertFalse(UrlResolver.isLoadableScheme("intent")); assertFalse(UrlResolver.isLoadableScheme(null))
     }
+
+    @Test fun seekStepGrowsWithRepeats() {
+        assertEquals(10, ChromeState.seekStep(0)); assertEquals(20, ChromeState.seekStep(3))
+        assertEquals(30, ChromeState.seekStep(6)); assertEquals(60, ChromeState.seekStep(20))
+    }
 }
