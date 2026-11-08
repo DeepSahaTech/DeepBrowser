@@ -50,7 +50,7 @@ class BrowserController(
     private val uas = UserAgents(context)
     private val cursor = CursorState(viewport.width.toFloat(), viewport.height.toFloat())
     private val fullscreen = FullscreenHost(overlayContainer) { tab.view.focus() }
-    private val pointer = PointerInjector({ tab.view.hostView }, cursor, main)
+    private val pointer = PointerInjector({ fullscreen.shown ?: tab.view.hostView }, cursor, main)
 
     var uaMode by mutableStateOf(settings.ua); private set
 
@@ -134,6 +134,29 @@ class BrowserController(
         viewWidth = { viewport.width },
         onRing = { focusRect = it },
     )
+    private var cursorFrameOn = false
+    private var lastFrameNs = 0L
+    private val cursorFrame = object : android.view.Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!cursor.moving) { cursorFrameOn = false; return }
+            val dt = if (lastFrameNs == 0L) 16f else ((frameTimeNanos - lastFrameNs) / 1_000_000f).coerceIn(1f, 50f)
+            lastFrameNs = frameTimeNanos
+            pointer.frame(dt)
+            cursorPos = Offset(cursor.x, cursor.y)
+            android.view.Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+    private fun startCursorFrames() {
+        if (cursorFrameOn) return
+        cursorFrameOn = true; lastFrameNs = 0L
+        android.view.Choreographer.getInstance().postFrameCallback(cursorFrame)
+    }
+    private var releasedKey: Key? = null
+    /** Pointer speed multiplier (Settings). */
+    var pointerSpeed: Float
+        get() = cursor.speedScale
+        set(v) { cursor.speedScale = v.coerceIn(0.5f, 2.5f); settings.pointerSpeed = cursor.speedScale }
+
     private val okLongPress = Runnable { chrome.okLongFired() }
     private val fsControlsOff = Runnable { chrome.hideControls() }
 
@@ -141,6 +164,7 @@ class BrowserController(
         Thread { adFilter.refresh(); val s = adFilter.status(); main.post { filterStatus = s } }.apply { isDaemon = true }.start()
         cursorPos = Offset(cursor.x, cursor.y)
         cursorEnabled = settings.nav == NavMode.POINTER
+        cursor.speedScale = settings.pointerSpeed
     }
 
     /** Switch between remote focus and the mouse pointer for web pages; persisted, with a brief on-screen label. */
@@ -338,6 +362,7 @@ class BrowserController(
         val key = KeyMap.of(e)
         val fs = fullscreen.active
         if (chrome.keepsControls(key, fs)) armControlsHide()
+        releasedKey = if (e.action == KeyEvent.ACTION_UP) key else null
         val state = chrome.keyState(fs, imeVisible(), isHome, viewport.nativeKeys)
         return execute(KeyRouter.route(KeyIn(key, e.action == KeyEvent.ACTION_DOWN, e.repeatCount), state))
     }
@@ -362,8 +387,12 @@ class BrowserController(
                 if (a.native) goBack()
                 else tab.view.eval("(window.__dbBack?window.__dbBack():'none')") { r -> if (r != "\"closed\"") goBack() }
             is KeyAction.Nav -> smartNav(a.dir.js)
-            is KeyAction.MoveCursor -> { pointer.moveCursor(a.dir); cursorPos = Offset(cursor.x, cursor.y) }
-            KeyAction.ReleaseCursor -> cursor.release()
+            is KeyAction.MoveCursor -> { cursor.hold(a.dir, true); startCursorFrames() }
+            KeyAction.ReleaseCursor -> when (releasedKey) {
+                Key.UP -> cursor.hold(Dir.UP, false); Key.DOWN -> cursor.hold(Dir.DOWN, false)
+                Key.LEFT -> cursor.hold(Dir.LEFT, false); Key.RIGHT -> cursor.hold(Dir.RIGHT, false)
+                else -> cursor.releaseAll()
+            }
             KeyAction.OkDown -> main.postDelayed(okLongPress, ChromeState.OK_LONG_MS) // tap on release; holding OK opens the command bar
             KeyAction.OkUpLong -> main.removeCallbacks(okLongPress)
             KeyAction.OkUpClick -> { main.removeCallbacks(okLongPress); pointer.click() }

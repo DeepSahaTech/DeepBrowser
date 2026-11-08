@@ -163,9 +163,9 @@ object SmartNav {
     try{(prim.get(el)||el).focus({preventScroll:true});}catch(e){}
     var r=rect(el);
     if(!fsEl()&&(r.top<innerHeight*0.12||r.bottom>innerHeight*0.88||r.left<innerWidth*0.03||r.right>innerWidth*0.97)){
-      el.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});
+      el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
     }
-    hover(el);push(120);
+    hover(el);warm(el);push(120);
     return 1;
   };
   window.__dbCarousel=function(d){
@@ -257,23 +257,45 @@ object SmartNav {
     try{var pm=f.call(box);if(pm&&pm.catch)pm.catch(fallback);}catch(x){fallback();}
   }
   window.__dbUnfake=function(){if(!fake)return false;fake.el.setAttribute('style',fake.css);fake=null;return true;};
+  // Images load eagerly and decode off the main thread; sites' own lazy images are switched to eager near the viewport first, the rest in idle time.
+  function near(i){var r=i.getBoundingClientRect();return r.bottom>-innerHeight&&r.top<innerHeight*3&&r.right>-innerWidth&&r.left<innerWidth*2;}
   function lazy(n){
     try{
-      if(n.tagName==='IMG'){if(!n.loading)n.loading='lazy';n.decoding='async';}
+      if(n.tagName==='IMG'){n.decoding='async';if(n.loading==='lazy'&&near(n))n.loading='eager';}
       else if(n.tagName==='VIDEO'&&n.paused&&n.preload!=='auto')n.preload='metadata';
-      else if(n.querySelectorAll)n.querySelectorAll('img:not([loading])').forEach(function(i){i.loading='lazy';i.decoding='async';});
+      else if(n.querySelectorAll)n.querySelectorAll('img').forEach(function(i){i.decoding='async';if(i.loading==='lazy'&&near(i))i.loading='eager';});
+    }catch(e){}
+  }
+  var idle=window.requestIdleCallback||function(f){return setTimeout(f,300);};
+  function sweep(){
+    idle(function(){
+      var l=[].slice.call(document.querySelectorAll('img[loading=lazy]')).slice(0,60),k=0;
+      l.sort(function(a,b){return Math.abs(a.getBoundingClientRect().top)-Math.abs(b.getBoundingClientRect().top);});
+      for(var i=0;i<l.length&&k<8;i++,k++)l[i].loading='eager';
+      setTimeout(sweep,1500);
+    });
+  }
+  // preconnect to the origin of the card being focused: the next page opens faster
+  var warmed={};
+  function warm(el){
+    try{
+      var a=el.closest&&el.closest('a[href]');if(!a)return;
+      var o=new URL(a.href,location.href).origin;if(warmed[o]||o==='null')return;warmed[o]=1;
+      var l=document.createElement('link');l.rel='preconnect';l.href=o;document.head.appendChild(l);
     }catch(e){}
   }
   // hero/background videos (muted loops) burn the Stick's decoder and make D-pad scrolling janky: keep them paused
   function freezeBg(v){
     try{
       if(v.tagName!=='VIDEO'||fsEl()||v.controls)return;
+      if(v.readyState<2)return;
       if((v.loop||(v.muted&&v.autoplay))&&!(navigator.userActivation&&navigator.userActivation.isActive)&&(!isFinite(v.duration)||v.duration<180)){v.pause();v.removeAttribute('autoplay');}
     }catch(e){}
   }
   document.addEventListener('play',function(e){freezeBg(e.target);},true);
+  document.addEventListener('loadeddata',function(e){freezeBg(e.target);},true);
   setInterval(function(){document.querySelectorAll('video').forEach(freezeBg);},3000);
-  lazy(document.documentElement);
+  lazy(document.documentElement);sweep();
   try{new MutationObserver(function(ms){ms.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType===1)lazy(n);});});}).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}
   addEventListener('load',function(){push(300);push(1500);});
   push(300);

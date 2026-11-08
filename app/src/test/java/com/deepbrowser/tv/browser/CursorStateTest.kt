@@ -38,6 +38,53 @@ class CursorStateTest {
         assertEquals(Edge.TOP, edge)
     }
 
+    @Test fun velocityRampsWithHoldTime() {
+        val c = cursor()
+        assertTrue(c.velocityAt(0f) < c.velocityAt(400f))
+        assertTrue(c.velocityAt(400f) < c.velocityAt(900f))
+        assertEquals(c.velocityAt(900f), c.velocityAt(5000f), 0.01f)
+    }
+
+    @Test fun tickIsFrameRateIndependent() {
+        val a = cursor(); val b = cursor()
+        a.hold(Dir.RIGHT, true); b.hold(Dir.RIGHT, true)
+        a.tick(32f)
+        b.tick(16f); b.tick(16f)
+        assertEquals(a.x, b.x, 3f)
+    }
+
+    @Test fun releaseStopsAndResetsRamp() {
+        val c = cursor(); c.hold(Dir.RIGHT, true); repeat(30) { c.tick(16f) }
+        c.hold(Dir.RIGHT, false)
+        val x = c.x; c.tick(16f)
+        assertEquals(x, c.x, 0.001f)
+        c.hold(Dir.RIGHT, true); c.tick(16f)
+        assertTrue(c.x - x < 6f)
+    }
+
+    @Test fun diagonalFromTwoHeldKeysIsNotFaster() {
+        val d = cursor(); d.hold(Dir.RIGHT, true); d.hold(Dir.DOWN, true); d.tick(100f)
+        val s = cursor(); s.hold(Dir.RIGHT, true); s.tick(100f)
+        val diag = Math.hypot((d.x - 960f).toDouble(), (d.y - 540f).toDouble())
+        assertEquals((s.x - 960f).toDouble(), diag, 0.5)
+    }
+
+    @Test fun oppositeKeysCancel() {
+        val c = cursor(); c.hold(Dir.LEFT, true); c.hold(Dir.RIGHT, true)
+        c.tick(100f); assertEquals(960f, c.x, 0.001f)
+    }
+
+    @Test fun tickReportsEdge() {
+        val c = cursor(); c.hold(Dir.DOWN, true)
+        var e = Edge.NONE; repeat(200) { e = c.tick(16f) }
+        assertEquals(Edge.BOTTOM, e)
+    }
+
+    @Test fun speedScaleScalesVelocity() {
+        val c = cursor(); val base = c.velocityAt(300f); c.speedScale = 2f
+        assertEquals(base * 2, c.velocityAt(300f), 0.01f)
+    }
+
     @Test fun resizeKeepsCursorInside() {
         val c = cursor(); c.moveTo(1900f, 1000f); c.resize(1280f, 720f)
         assertTrue(c.x <= 1279f && c.y <= 719f)

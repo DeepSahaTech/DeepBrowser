@@ -10,6 +10,8 @@ class FullscreenHost(private val container: FrameLayout, private val onExit: () 
     private var view: View? = null
     private var callback: WebChromeClient.CustomViewCallback? = null
     val active: Boolean get() = view != null
+    /** The page's fullscreen view: it sits above the WebView, so touches for the player must go to it. */
+    val shown: View? get() = view
 
     fun show(v: View, cb: WebChromeClient.CustomViewCallback) {
         if (view != null) { cb.onCustomViewHidden(); return }
