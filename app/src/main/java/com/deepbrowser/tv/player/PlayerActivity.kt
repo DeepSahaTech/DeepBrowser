@@ -27,7 +27,6 @@ import androidx.media3.ui.PlayerView
 class PlayerActivity : Activity() {
     private lateinit var player: ExoPlayer
     private lateinit var view: PlayerView
-    private var seekRepeat = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,11 +77,10 @@ class PlayerActivity : Activity() {
             }
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
                 if (e.action == KeyEvent.ACTION_DOWN) {
-                    seekRepeat = e.repeatCount
-                    val step = 10_000L * (1 + seekRepeat / 4).coerceAtMost(6) // 10s, then 20s.. up to 60s while held
+                    val step = PlayerLogic.seekStepMs(e.repeatCount)
                     val back = e.keyCode == KeyEvent.KEYCODE_DPAD_LEFT || e.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND
-                    val dur = if (player.duration == C.TIME_UNSET) Long.MAX_VALUE else player.duration
-                    player.seekTo((player.currentPosition + if (back) -step else step).coerceIn(0, dur))
+                    val dur = if (player.duration == C.TIME_UNSET) null else player.duration
+                    player.seekTo(PlayerLogic.seekTarget(player.currentPosition, step, back, dur))
                     view.showController()
                 }
                 return true
@@ -124,8 +122,8 @@ class PlayerActivity : Activity() {
             if (!g.isTrackSupported(t)) continue
             val f = g.getTrackFormat(t)
             labels += when (type) {
-                C.TRACK_TYPE_VIDEO -> if (f.height > 0) "${f.height}p" + if (f.bitrate > 0) " (${f.bitrate / 1000} kbps)" else "" else "Track ${labels.size}"
-                else -> f.label ?: f.language ?: "Track ${labels.size}"
+                C.TRACK_TYPE_VIDEO -> PlayerLogic.videoLabel(f.height, f.bitrate, labels.size)
+                else -> PlayerLogic.namedLabel(f.label, f.language, labels.size)
             }
             acts += {
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()

@@ -17,7 +17,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.deepbrowser.tv.data.Library
 import com.deepbrowser.tv.data.NavMode
-import com.deepbrowser.tv.data.Page
 import com.deepbrowser.tv.data.PrefsStore
 import com.deepbrowser.tv.data.Settings
 import com.deepbrowser.tv.data.UaMode
@@ -45,12 +44,13 @@ class BrowserController(
     private val filterChoice = FilterSourceChoice(store)
     private val adFilter = AdFilter(HttpFileSource(context.filesDir, url = { filterChoice.url }))
     private val settings = Settings(store)
-    private val library = Library(store)
+    /** Read by the panels directly (Compose state lives in the module). */
+    val library = Library(store)
     private val uas = UserAgents(context)
     private val cursor = CursorState(viewport.width.toFloat(), viewport.height.toFloat())
     private val fullscreen = FullscreenSession(FullscreenHost(overlayContainer) { tab.view.focus() }, chrome, HandlerScheduler(main))
     private val pointer = PointerInjector({ fullscreen.shown ?: tab.view.hostView }, cursor, main)
-    private val filters = FilterUpdater(
+    val filters = FilterUpdater(
         adFilter, filterChoice,
         background = { work -> Thread(work).apply { isDaemon = true }.start() },
         onMain = { main.post(it) },
@@ -112,17 +112,10 @@ class BrowserController(
     var companionHelp by mutableStateOf(false)
     var focusRect by mutableStateOf<Rect?>(null); private set
     var adBlockOn by mutableStateOf(adState.enabled); private set
-    val bookmarks: List<Page> get() = library.bookmarks
-    val historyItems: List<Page> get() = library.history
     var cursorPos by mutableStateOf(Offset.Zero); private set
 
     val isHome: Boolean get() = lifecycle.isHome
     val isBookmarked: Boolean get() = library.isBookmarked(currentUrl)
-    val filterRules: Int get() = filters.status.rules
-    val filterStatus: FilterStatus get() = filters.status
-    val filterUpdating: Boolean get() = filters.updating
-    val filterSource: String get() = filters.source
-    val filterLinkError: String? get() = filters.linkError
 
     /** True once the first frame is drawn and the WebView has been built. */
     var warmed = false; private set
@@ -241,10 +234,6 @@ class BrowserController(
         if (!isHome) tab.view.reload()
     }
 
-    fun updateFilterList() = filters.update()
-    fun setFilterLink(input: String): Boolean = filters.setLink(input)
-    fun resetFilterLink() = filters.resetLink()
-
     fun adsBlocked(): Long = adState.totalBlocked()
 
     fun toggleBookmark() {
@@ -252,16 +241,12 @@ class BrowserController(
         library.toggleBookmark(currentUrl, title.ifBlank { UrlResolver.displayHost(currentUrl) })
     }
 
-    fun removeBookmark(p: Page) { library.toggleBookmark(p.url, p.title) }
-
-    fun clearHistory() = library.clearHistory()
-
     /** Cookies, cache, web storage, form data, back/forward lists and history. Bookmarks and settings are kept. */
     fun clearBrowsingData() {
         CookieManager.getInstance().apply { removeAllCookies(null); flush() }
         WebStorage.getInstance().deleteAllData()
         tabs.forEach { it.view.clearData() }
-        clearHistory(); session.syncNav()
+        library.clearHistory(); session.syncNav()
     }
 
     fun openPanel(p: Panel) = chrome.openPanel(p)
