@@ -167,6 +167,12 @@ private fun LazyListScope.settingRows(c: BrowserController, first: FocusRequeste
     item("reset") { SettingRow("Reset to default", "GitHub list") { editing.value = false; c.resetFilterLink() } }
     item("ua") { SettingRow("Site mode (user agent)", c.uaMode.label) { c.cycleUa() } }
     item("nav") { SettingRow("Navigation", c.navMode.label) { c.toggleNavMode() } }
+    item("ptr") {
+        val steps = listOf(0.5f, 0.75f, 1f, 1.5f, 2f, 2.5f)
+        SettingRow("Pointer speed", "%.2gx".format(c.pointerSpeed)) {
+            c.pointerSpeed = steps.firstOrNull { it > c.pointerSpeed + 0.01f } ?: steps.first()
+        }
+    }
     item("clear") { ClearRow(c) }
 }
 
