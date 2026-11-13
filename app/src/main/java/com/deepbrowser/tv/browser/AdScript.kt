@@ -8,9 +8,10 @@ object AdScript {
   var css='.ytp-ad-module,.ytp-ad-overlay-container,.ytp-ad-player-overlay,.ytp-ad-image-overlay,#player-ads,'
    +'ytd-ad-slot-renderer,ytd-in-feed-ad-layout-renderer,ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer,'
    +'ytd-banner-promo-renderer,ytd-companion-slot-renderer,ytd-action-companion-ad-renderer,.ytd-merch-shelf-renderer,'
-   +'ytlr-ad-slot-renderer,.ad-container,.ad-banner,.adsbygoogle,ins.adsbygoogle,[id^="google_ads"],[id^="div-gpt-ad"],'
+   +'.ad-container,.ad-banner,.adsbygoogle,ins.adsbygoogle,[id^="google_ads"],[id^="div-gpt-ad"],'
    +'[class*="advert"],[id*="advert"],[class^="ad-"],[class*=" ad-"],[id^="ad-"],[class*="sponsor"],iframe[src*="doubleclick"],'
    +'iframe[src*="googlesyndication"],iframe[src*="adsterra"],.popup-ad,.pop-under{display:none!important}';
+  // No ytlr-ad-slot-renderer here: YouTube TV keeps its focus on that tile, so hiding it froze the remote on Home.
   var s=document.createElement('style');s.textContent=css;(document.head||document.documentElement).appendChild(s);
   function yt(){
     var p=document.querySelector('#movie_player,.html5-video-player');

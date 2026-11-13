@@ -74,10 +74,10 @@
     return stage1(dir, S, C) ? raw(dir, S, C) : INF;
   }
 
-  // cands: [{id, rect}]. Returns the winning candidate object or null.
-  function pick(dir, S, cands) {
+  // cands: [{id, rect}]. Returns the winning candidate object or null. strict: stage 1 only.
+  function pick(dir, S, cands, strict) {
     var best = null, bestS = INF, bestD = INF;
-    for (var pass = 1; pass <= 2 && best === null; pass++) {
+    for (var pass = 1; pass <= (strict ? 1 : 2) && best === null; pass++) {
       for (var i = 0; i < cands.length; i++) {
         var C = cands[i].rect;
         if (pass === 1 ? !stage1(dir, S, C) : !stage2(dir, S, C)) continue;
@@ -105,6 +105,19 @@
       }
     }
     return items.filter(function (_, k) { return !drop[k]; });
+  }
+
+  // items: [{rect, href}]. Drops a link stacked right above/below a bigger link to the same href (card + caption),
+  // so D-pad stops once per item. Far-apart twins (logo and Home button) both stay.
+  function twins(items) {
+    return items.filter(function (A) {
+      if (!A.href) return true;
+      return !items.some(function (B) {
+        if (B === A || B.href !== A.href || area(B.rect) <= area(A.rect)) return false;
+        var ov = Math.min(A.rect.r, B.rect.r) - Math.max(A.rect.l, B.rect.l);
+        return ov >= 0.5 * Math.min(A.rect.r - A.rect.l, B.rect.r - B.rect.l) && gap(A.rect.t, A.rect.b, B.rect.t, B.rect.b) < 48;
+      });
+    });
   }
 
   // First-tier target: a text link/button of any size, or a text-less control whose shorter side is >= 28 CSS px.
@@ -156,6 +169,7 @@
     score: score,
     pick: pick,
     dedupe: dedupe,
+    twins: twins,
     visibleFraction: visibleFraction,
     roomy: roomy,
     okAction: okAction,

@@ -235,9 +235,9 @@
       // Outside fullscreen a video is a target only if it shows its own controls (banner trailers are not).
       if (!full && els[i].tagName === 'VIDEO' && !els[i].controls) continue;
       var c = liveCandidate(els[i], full);
-      if (c) items.push(c);
+      if (c) { if (c.el.tagName === 'A') c.href = c.el.href; items.push(c); }
     }
-    var kept = core.dedupe(items);
+    var kept = core.twins(core.dedupe(items));
     // Non-native wrappers (e.g. a focusable scroller around card rows) would take focus as one big box.
     return kept.filter(function (c) {
       if (NATIVE_TAG.test(c.el.tagName)) return true;
@@ -357,11 +357,11 @@
     }
     return false;
   }
-  function pickOnce(dir, S, list) {
+  function pickOnce(dir, S, list, strict) {
     // Player controls overlay the video and toggle pointer-events while fading, so a hit test would reject them.
-    if (videoMode()) return core.pick(dir, S.rect, list);
+    if (videoMode()) return core.pick(dir, S.rect, list, strict);
     for (var tries = 0; tries < 10 && list.length; tries++) {
-      var p = core.pick(dir, S.rect, list);
+      var p = core.pick(dir, S.rect, list, strict);
       if (!p) return null;
       if (hitOk(p)) return p;
       list = list.filter(function (c) { return c !== p; });
@@ -369,15 +369,15 @@
     return null;
   }
   // Two tiers: tiny targets (slide dots, 24 px icons) only win when no normal-sized target lies that way.
-  function choose(dir, S, list) {
+  function choose(dir, S, list, strict) {
     // Cards scrolled out sideways in a row/carousel are reachable only by Left/Right, never by Up/Down.
     if (dir === 'up' || dir === 'down') {
       var VW = vw();
       list = list.filter(function (c) { return core.visibleFraction(c.rect, VW) >= 0.5; });
     }
     var big = list.filter(function (c) { return isTextEl(c.el) || core.roomy(c.rect, !!textOf(c.el)); });
-    var p = pickOnce(dir, S, big);
-    if (!p && big.length < list.length) p = pickOnce(dir, S, list);
+    var p = pickOnce(dir, S, big, strict);
+    if (!p && big.length < list.length) p = pickOnce(dir, S, list, strict);
     return p;
   }
   function fresh(list) {
@@ -407,7 +407,9 @@
       if (C === R && !fixedStart) {
         p = choose(dir, S, inside.filter(function (c) { return !inFixedOrSticky(c.el); }));
       }
-      if (!p) p = choose(dir, S, inside);
+      // Up/Down inside a row: only targets fully past the start, else a taller card beside it would win
+      // over the next row (Down from Movy's wide TOP 1 card went to TOP 2).
+      if (!p) p = choose(dir, S, inside, C !== R && (dir === 'up' || dir === 'down'));
       if (p) { focusEl(p.el); return true; }
       if (canScroll(C, dir)) {
         scrollBy(C, dir, 0.6);
@@ -673,7 +675,9 @@
         return;
       }
       cands = cands.filter(function (c) { return !(S.el && (S.el.contains(c.el) || c.el.contains(S.el))); });
-      if (move(dir, S, cands, R)) handled(e);
+      // Top frame: a dead end does nothing. Unhandled, WebView's own spatial navigation jumps far away
+      // (Right from a Movy row heading landed on the slideshow dots). Frames keep it so focus can leave them.
+      if (move(dir, S, cands, R) || window === window.top) handled(e);
     } catch (err) {
       // Fall through: the key keeps its default behaviour.
     }
