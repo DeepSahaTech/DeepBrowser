@@ -22,6 +22,8 @@ interface PageEvents {
     fun shouldBlock(url: String, host: String?): Boolean
     fun openMedia(url: String, referer: String?)
     fun popup(url: String)
+    /** A page video was handed over to the native player through the MSE bridge. */
+    fun nativePlayback(sessionId: String)
 }
 
 /** Settings a tab's view takes when it is first built. */

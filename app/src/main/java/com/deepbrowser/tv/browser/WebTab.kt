@@ -21,9 +21,17 @@ import android.webkit.WebViewClient
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.deepbrowser.tv.player.BridgeInbox
+import com.deepbrowser.tv.player.BridgeSession
+import com.deepbrowser.tv.player.BridgeSessions
+import com.deepbrowser.tv.player.BridgeTrack
 import com.deepbrowser.tv.player.MediaUrl
+import org.json.JSONObject
+import java.util.UUID
 
 /**
  * Adapter: a [TabView] over a WebView built only when first asked for (WebView startup is slow on Fire TV).
@@ -45,6 +53,10 @@ class WebTab(
     private var destroyed = false
     private val deadView by lazy { View(context) } // what a destroyed tab hands out instead of rebuilding a WebView
     private val popups = HashSet<WebView>()
+    private var inbox: BridgeInbox? = null // binary and text messages of the page's current native-playback session
+    private var nativeSession: BridgeSession? = null // at most one session per tab
+    private var frameOrigin: String? = null // the frame whose 'start' opened the session: the only sender while it lasts
+    private var frameMain = false
 
     override val hostView: View get() = wv ?: if (destroyed) deadView else build().also { wv = it; ready = true }
     override val userAgent: String? get() = wv?.settings?.userAgentString
@@ -97,8 +109,66 @@ class WebTab(
             WebViewCompat.addDocumentStartJavaScript(v, PageScripts.CODEC_PATCH, setOf("*"))
             WebViewCompat.addDocumentStartJavaScript(v, scripts.all, setOf("*"))
         }
+        installMseBridge(v)
         cfg.scalePercent?.let { v.setInitialScale(it) }
         return v
+    }
+
+    /** Page MSE data reaches the app as `window.dbMse` messages; without both features the bridge is simply absent. */
+    private fun installMseBridge(v: WebView) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) ||
+            !WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)) return
+        WebViewCompat.addWebMessageListener(v, "dbMse", setOf("*")) { _, message, sourceOrigin, isMainFrame, reply ->
+            try {
+                onPageMessage(message, sourceOrigin.toString(), isMainFrame, reply)
+            } catch (e: Exception) {
+                android.util.Log.w("DBMSE", "ignored bad page message", e)
+            }
+        }
+    }
+
+    /** One session per tab: a 'start' is taken only when none is active, and while one is, only its own frame may send. */
+    private fun onPageMessage(message: WebMessageCompat, origin: String, mainFrame: Boolean, reply: JavaScriptReplyProxy) {
+        val binary = message.type == WebMessageCompat.TYPE_ARRAY_BUFFER
+        val bytes = if (binary) message.arrayBuffer else null
+        val text = if (binary) null else message.data.orEmpty()
+        if ((bytes?.size ?: text!!.length) > MAX_MESSAGE_BYTES) return
+        // The session ended (the player removed it): forget the tab's session so a later 'start' is accepted.
+        nativeSession?.let { if (BridgeSessions.get(it.id) == null) clearNative() }
+        if (nativeSession != null && (origin != frameOrigin || mainFrame != frameMain)) return
+        if (bytes != null) { inbox?.onBytes(bytes); return }
+        val type = runCatching { JSONObject(text!!).optString("type") }.getOrDefault("")
+        when {
+            type == "start" -> if (nativeSession == null) startNativePlayback(text!!, reply, origin, mainFrame)
+            else -> inbox?.onText(text!!)
+        }
+    }
+
+    private fun clearNative() {
+        nativeSession = null
+        inbox = null
+        frameOrigin = null
+        frameMain = false
+    }
+
+    private fun startNativePlayback(json: String, reply: JavaScriptReplyProxy, origin: String, mainFrame: Boolean) {
+        val msg = JSONObject(json)
+        val sbs = msg.optJSONArray("sbs") ?: return
+        val tracks = (0 until sbs.length()).map { i ->
+            val o = sbs.getJSONObject(i)
+            // mse.js names each SourceBuffer "sb" (a number); the same key tags its init/seg headers.
+            BridgeTrack(o.optString("sb"), o.optString("mime"), o.optLong("timescale", 1000L))
+        }
+        if (tracks.isEmpty()) return
+        val session = BridgeSession(UUID.randomUUID().toString(), tracks, msg.optDouble("t", 0.0)) { cmd ->
+            runCatching { reply.postMessage(cmd) } // the page may already be gone
+        }
+        BridgeSessions.put(session)
+        nativeSession = session
+        frameOrigin = origin
+        frameMain = mainFrame
+        inbox = BridgeInbox(session)
+        events.nativePlayback(session.id)
     }
 
     private fun configure(wv: WebView, cfg: TabConfig) {
@@ -191,6 +261,7 @@ class WebTab(
 }
 
 private const val POPUP_TIMEOUT_MS = 15_000L
+private const val MAX_MESSAGE_BYTES = 16 * 1024 * 1024 // larger page messages are ignored (text counted in chars)
 
 private fun emptyResponse() =
     WebResourceResponse("text/plain", "utf-8", 204, "No Content", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))

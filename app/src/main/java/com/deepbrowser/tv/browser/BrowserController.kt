@@ -21,6 +21,7 @@ import com.deepbrowser.tv.data.Settings
 import com.deepbrowser.tv.data.UaMode
 import com.deepbrowser.tv.device.CapabilityProbe
 import com.deepbrowser.tv.device.DeviceCapabilities
+import com.deepbrowser.tv.player.BridgePlayerActivity
 import com.deepbrowser.tv.player.MediaUrl
 import com.deepbrowser.tv.player.PlayerActivity
 
@@ -80,6 +81,7 @@ class BrowserController(
         }
         override fun openMedia(url: String, referer: String?) = openPlayer(url, referer)
         override fun popup(url: String) = loadInput(url)
+        override fun nativePlayback(sessionId: String) = BridgePlayerActivity.open(context, sessionId)
     }
 
     private val session = TabSession(::createTab)
@@ -270,7 +272,11 @@ class BrowserController(
         lifecycle.applyScale()
     }
 
-    fun onPause() { tab.view.pause(); adState.flush() }
+    fun onPause() {
+        // The native bridge player sits on top of this activity while the page keeps loading its video for it.
+        if (!com.deepbrowser.tv.player.BridgeSessions.active()) tab.view.pause()
+        adState.flush()
+    }
     fun onResume() = tab.view.resume()
     fun destroy() { adState.flush(); session.destroyAll() }
 
