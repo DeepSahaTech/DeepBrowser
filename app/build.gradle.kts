@@ -12,8 +12,8 @@ android {
         applicationId = "com.deepbrowser.tv"
         minSdk = 28          // Fire OS 7 (Android 9) is the lowest supported target
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
     }
 
     buildTypes {

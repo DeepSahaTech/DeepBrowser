@@ -160,3 +160,21 @@ test('(14) roomy keeps text links and real icon buttons, rejects text-less slide
   assert.equal(core.roomy(rect(0, 0, 90, 20), true), true);      // inline text link
   assert.equal(core.roomy(rect(10, 10, 10, 10), true), false);
 });
+
+test('(twins) caption link under its card is dropped; far-apart same-href links stay', () => {
+  const kept = core.twins([
+    { id: 'card', href: '/t/1', rect: rect(0, 0, 600, 300) },
+    { id: 'caption', href: '/t/1', rect: rect(0, 310, 300, 340) },
+    { id: 'logo', href: '/', rect: rect(0, 0, 40, 40) },
+    { id: 'home', href: '/', rect: rect(700, 0, 800, 40) },
+    { id: 'btn', rect: rect(0, 350, 100, 380) }
+  ]);
+  assert.deepEqual(kept.map((i) => i.id), ['card', 'logo', 'home', 'btn']);
+});
+
+test('(strict) pick with strict ignores stage-2-only candidates', () => {
+  const S = rect(0, 0, 600, 300);
+  const taller = [{ id: 'side', rect: rect(610, 0, 810, 340) }];
+  assert.equal(core.pick('down', S, taller).id, 'side');
+  assert.equal(core.pick('down', S, taller, true), null);
+});
