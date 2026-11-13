@@ -9,12 +9,6 @@ package com.deepbrowser.tv.browser
 object SmartNav {
     val SCRIPT: String = """
 (function(){
-  try{
-    var m=document.querySelector('meta[name=viewport]');
-    if(!m){m=document.createElement('meta');m.name='viewport';(document.head||document.documentElement).appendChild(m);}
-    var W=/^https?:\/\/([a-z0-9-]+\.)*youtube\.com\/tv/i.test(location.href)?${Viewport.TV_LAYOUT_WIDTH}:${Viewport.LAYOUT_WIDTH};
-    if(m.content!=='width='+W)m.content='width='+W;
-  }catch(e){}
   if(window.__dbSel||/^https?:\/\/([a-z0-9-]+\.)*youtube\.com\/tv/i.test(location.href))return; // TV-native sites keep their own navigation
   var st=document.createElement('style');
   st.textContent=':fullscreen [data-db-focus],:-webkit-full-screen [data-db-focus]{outline:4px solid #8FB4FF!important;outline-offset:3px!important;border-radius:8px}';
@@ -265,50 +259,6 @@ object SmartNav {
     },350);
     return 'click';
   };
-  document.addEventListener('play',function(e){
-    var v=e.target;
-    if(!(v instanceof HTMLVideoElement)||fsEl())return;
-    if(navigator.userActivation&&!navigator.userActivation.isActive)return;
-    var r=v.getBoundingClientRect();
-    if(r.width<240||r.height<135)return;
-    var box=v,p=v.parentElement;
-    while(p&&p!==document.body&&p!==document.documentElement){
-      var pr=p.getBoundingClientRect();
-      if(pr.width<=r.width*1.5&&pr.height<=r.height*1.5&&p.querySelectorAll('a[href]').length<=12){box=p;p=p.parentElement;}else break;
-    }
-    goFull(box);
-  },true);
-  var fake=null;
-  // Fullscreen API needs a user gesture; when refused, make the player box fill the screen with CSS instead (site controls stay inside it)
-  function goFull(box){
-    var f=box.requestFullscreen||box.webkitRequestFullscreen;
-    var fallback=function(){
-      if(fake||fsEl())return;
-      fake={el:box,css:box.getAttribute('style')||''};
-      box.style.cssText+=';position:fixed!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;z-index:2147483000!important;background:#000!important;margin:0!important;transform:none!important;';
-    };
-    if(!f){fallback();return;}
-    try{var pm=f.call(box);if(pm&&pm.catch)pm.catch(fallback);}catch(x){fallback();}
-  }
-  window.__dbUnfake=function(){if(!fake)return false;fake.el.setAttribute('style',fake.css);fake=null;return true;};
-  // Images load eagerly and decode off the main thread; sites' own lazy images are switched to eager near the viewport first, the rest in idle time.
-  function near(i){var r=i.getBoundingClientRect();return r.bottom>-innerHeight&&r.top<innerHeight*3&&r.right>-innerWidth&&r.left<innerWidth*2;}
-  function lazy(n){
-    try{
-      if(n.tagName==='IMG'){n.decoding='async';if(n.loading==='lazy'&&near(n))n.loading='eager';}
-      else if(n.tagName==='VIDEO'&&n.paused&&n.preload!=='auto')n.preload='metadata';
-      else if(n.querySelectorAll)n.querySelectorAll('img').forEach(function(i){i.decoding='async';if(i.loading==='lazy'&&near(i))i.loading='eager';});
-    }catch(e){}
-  }
-  var idle=window.requestIdleCallback||function(f){return setTimeout(f,300);};
-  function sweep(){
-    idle(function(){
-      var l=[].slice.call(document.querySelectorAll('img[loading=lazy]')).slice(0,60),k=0;
-      l.sort(function(a,b){return Math.abs(a.getBoundingClientRect().top)-Math.abs(b.getBoundingClientRect().top);});
-      for(var i=0;i<l.length&&k<8;i++,k++)l[i].loading='eager';
-      setTimeout(sweep,1500);
-    });
-  }
   // preconnect to the origin of the card being focused: the next page opens faster
   var warmed={};
   function warm(el){
@@ -318,32 +268,6 @@ object SmartNav {
       var l=document.createElement('link');l.rel='preconnect';l.href=o;document.head.appendChild(l);
     }catch(e){}
   }
-  // hero/background videos (muted loops) burn the Stick's decoder and make D-pad scrolling janky: keep them paused
-  function freezeBg(v){
-    try{
-      if(v.tagName!=='VIDEO'||fsEl()||v.controls)return;
-      if(v.readyState<2)return;
-      if((v.loop||(v.muted&&v.autoplay))&&!(navigator.userActivation&&navigator.userActivation.isActive)&&(!isFinite(v.duration)||v.duration<180)){v.pause();v.removeAttribute('autoplay');}
-    }catch(e){}
-  }
-  // The video layer is composited outside the page: a CSS mask on an ancestor hides it and a transform on it draws it in the wrong size.
-  function fixVideo(v){
-    try{
-      if(v.tagName!=='VIDEO'||fsEl())return;
-      if(getComputedStyle(v).transform!=='none')v.style.setProperty('transform','none','important');
-      var a=v.parentElement;
-      for(var d=0;d<8&&a&&a!==document.documentElement;d++,a=a.parentElement){
-        var c=getComputedStyle(a);
-        if((c.webkitMaskImage||c.maskImage||'none')!=='none'){a.style.setProperty('-webkit-mask-image','none','important');a.style.setProperty('mask-image','none','important');}
-      }
-    }catch(e){}
-  }
-  ['loadedmetadata','loadeddata','play'].forEach(function(n){document.addEventListener(n,function(e){fixVideo(e.target);},true);});
-  document.addEventListener('play',function(e){freezeBg(e.target);},true);
-  document.addEventListener('loadeddata',function(e){freezeBg(e.target);},true);
-  setInterval(function(){document.querySelectorAll('video').forEach(function(v){fixVideo(v);freezeBg(v);});},2000);
-  lazy(document.documentElement);sweep();
-  try{new MutationObserver(function(ms){ms.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType===1)lazy(n);});});}).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}
   addEventListener('load',function(){push(300);push(1500);});
   push(300);
 })();

@@ -14,6 +14,7 @@
   var MODAL = 'dialog[open],[aria-modal="true"],[role=dialog],[role=alertdialog]';
   var CONTAINER_ROLE = /^(listbox|menu|menubar|tablist|tree|grid|dialog)$/;
   var YT_TV = /^https?:\/\/([a-z0-9-]+\.)*youtube\.com\/tv/i;
+  var NATIVE_TAG = /^(A|BUTTON|INPUT|SELECT|TEXTAREA|SUMMARY|VIDEO|IFRAME)$/;
   var RING_CSS = 'position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;' +
     'border:4px solid #8FB4FF;border-radius:10px;box-sizing:border-box;display:none;' +
     'transition:transform 90ms,width 90ms,height 90ms';
@@ -154,7 +155,12 @@
       var c = liveCandidate(els[i], full);
       if (c) items.push(c);
     }
-    return core.dedupe(items);
+    var kept = core.dedupe(items);
+    // Non-native wrappers (e.g. a focusable scroller around card rows) would take focus as one big box.
+    return kept.filter(function (c) {
+      if (NATIVE_TAG.test(c.el.tagName)) return true;
+      return !kept.some(function (o) { return o.el !== c.el && c.el.contains(o.el); });
+    });
   }
 
   // ---- start point and initial pick (D.2) ----
@@ -199,7 +205,12 @@
     return isBody(C) ? (doc.scrollingElement || doc.documentElement) : C;
   }
   function canScroll(C, dir) {
-    var s = scroller(C);
+    var s = scroller(C), vert = dir === 'up' || dir === 'down';
+    // Only real scroll containers scroll: a fixed header with visible overflow looks taller than it is.
+    if (s !== doc.documentElement && s !== doc.scrollingElement) {
+      var cs = styleOf(s);
+      if (!scrolls(vert ? cs.overflowY : cs.overflowX)) return false;
+    }
     if (dir === 'up') return s.scrollTop > 1;
     if (dir === 'down') return s.scrollTop < s.scrollHeight - s.clientHeight - 1;
     if (dir === 'left') return s.scrollLeft > 1;
@@ -238,8 +249,21 @@
     if (typeof doc.elementFromPoint !== 'function') return true;
     var r = p.rect, VW = vw(), VH = vh();
     if (r.b <= 0 || r.t >= VH || r.r <= 0 || r.l >= VW) return true;   // off-screen: nothing to test
-    var hit = hitAt((Math.max(r.l, 0) + Math.min(r.r, VW)) / 2, (Math.max(r.t, 0) + Math.min(r.b, VH)) / 2);
-    return !!hit && (hit === p.el || p.el.contains(hit) || hit.contains(p.el));
+    // Three points down the centre line: a fixed header can cover the top of a partly scrolled row.
+    var x = (Math.max(r.l, 0) + Math.min(r.r, VW)) / 2;
+    var t = Math.max(r.t, 0), b = Math.min(r.b, VH);
+    for (var i = 0; i < 3; i++) {
+      var hit = hitAt(x, t + (b - t) * [0.25, 0.5, 0.75][i]);
+      if (hit && (hit === p.el || p.el.contains(hit) || hit.contains(p.el))) return true;
+    }
+    return false;
+  }
+  function inFixedOrSticky(el) {
+    for (var p = el; p && p !== doc.documentElement; p = p.parentElement) {
+      var pos = styleOf(p).position;
+      if (pos === 'fixed' || pos === 'sticky') return true;
+    }
+    return false;
   }
   function choose(dir, S, list) {
     for (var tries = 0; tries < 10 && list.length; tries++) {
@@ -261,10 +285,23 @@
   // Container chain first (innermost to R), then scroll one step and retry once (D.5).
   function move(dir, S, cands, R) {
     var chain = containers(S.el, R).concat([R]);
+    var fixedStart = inFixedOrSticky(S.el);
     for (var k = 0; k < chain.length; k++) {
       var C = chain[k];
       var inside = C === R ? cands : cands.filter(function (c) { return C.contains(c.el); });
-      var p = choose(dir, S, inside);
+      // Up from a fixed header must not jump to content scrolled out of view above it.
+      if (C === R && fixedStart) {
+        inside = inside.filter(function (c) {
+          var r = c.rect;
+          return r.b > 0 && r.t < vh() && r.r > 0 && r.l < vw();
+        });
+      }
+      // From content, prefer non-fixed targets (e.g. hero buttons) over an always-visible header.
+      var p = null;
+      if (C === R && !fixedStart) {
+        p = choose(dir, S, inside.filter(function (c) { return !inFixedOrSticky(c.el); }));
+      }
+      if (!p) p = choose(dir, S, inside);
       if (p) { focusEl(p.el); return true; }
       if (canScroll(C, dir)) {
         scrollBy(C, dir, 0.6);

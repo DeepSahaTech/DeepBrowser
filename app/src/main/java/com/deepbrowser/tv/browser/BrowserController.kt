@@ -47,6 +47,7 @@ class BrowserController(
     /** Read by the panels directly (Compose state lives in the module). */
     val library = Library(store)
     private val uas = UserAgents(context)
+    private val scripts = NavScripts(context)
     private val cursor = CursorState(viewport.width.toFloat(), viewport.height.toFloat())
     private val fullscreen = FullscreenSession(FullscreenHost(overlayContainer) { tab.view.focus() }, chrome, HandlerScheduler(main))
     private val pointer = PointerInjector({ fullscreen.shown ?: tab.view.hostView }, cursor, main)
@@ -188,6 +189,7 @@ class BrowserController(
     }
 
     private fun inject(v: TabView) {
+        v.eval(scripts.tweaks)
         v.eval(SmartNav.SCRIPT)
         if (adState.enabled) v.eval(adFilter.injection())
     }
