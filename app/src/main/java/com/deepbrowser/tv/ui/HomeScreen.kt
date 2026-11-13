@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -49,6 +50,7 @@ fun HomeScreen(
     bookmarks: List<Page>, onOpen: (String) -> Unit, onAddress: () -> Unit, onInfo: () -> Unit, onPanel: (Panel) -> Unit,
 ) {
     val start = remember { FocusRequester() }
+    val firstPanel = remember { FocusRequester() } // Down from the full-width address bar goes to the first chip, not the one under its centre
     val initial = remember { last.value }
     LaunchedEffect(Unit) { start.requestWhenReady() }
     fun Modifier.slot(id: String): Modifier =
@@ -71,7 +73,7 @@ fun HomeScreen(
         // Address pill: opens the command bar
         GlassButton(
             onClick = onAddress,
-            modifier = Modifier.fillMaxWidth().slot("address"),
+            modifier = Modifier.fillMaxWidth().focusProperties { down = firstPanel }.slot("address"),
             radius = Cmp.barRadius,
             focusedScale = 1.04f,
             container = Cmp.barContainer,
@@ -85,7 +87,7 @@ fun HomeScreen(
         Spacer(Modifier.height(Cmp.gap))
         Row(horizontalArrangement = Arrangement.spacedBy(Cmp.gap)) {
             listOf(Panel.Bookmarks, Panel.History, Panel.Tabs, Panel.Settings).forEach { p ->
-                GlassButton(onClick = { onPanel(p) }, modifier = Modifier.slot("panel:${p.name}")) { Text(p.title, fontSize = Cmp.body, color = Sem.onSurface, maxLines = 1) }
+                GlassButton(onClick = { onPanel(p) }, modifier = (if (p == Panel.Bookmarks) Modifier.focusRequester(firstPanel) else Modifier).slot("panel:${p.name}")) { Text(p.title, fontSize = Cmp.body, color = Sem.onSurface, maxLines = 1) }
             }
         }
         Spacer(Modifier.height(Cmp.gap))

@@ -44,6 +44,8 @@ class PlayerActivity : Activity() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(scoped))
             .build()
         view = PlayerView(this).apply {
+            setBackgroundColor(android.graphics.Color.BLACK) // letterbox bars: black, not the app theme colour
+            setShutterBackgroundColor(android.graphics.Color.BLACK)
             layoutParams = ViewGroup.LayoutParams(-1, -1)
             this.player = this@PlayerActivity.player
             controllerShowTimeoutMs = 4000

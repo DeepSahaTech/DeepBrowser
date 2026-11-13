@@ -3,8 +3,9 @@ package com.deepbrowser.tv.browser
 /**
  * Small Adblock-Plus-syntax engine (EasyList subset), pure Kotlin so it is unit-testable.
  * Supports: `||host^` and `||host/path` network rules, plain substring rules, `|`/`^` anchors,
- * `@@` exceptions, generic `##selector` cosmetic rules. Rule options after `$` are ignored except
- * `third-party` is not enforced.
+ * `@@` exceptions, generic `##selector` cosmetic rules. Other rule options are ignored, except that a rule whose
+ * options limit or change where it applies (see [SCOPED]) is skipped: applied everywhere it would block far too much
+ * (EasyList's `||googlevideo.com/videoplayback?$rewrite=…,domain=…` blocked every YouTube video).
  * shortcut: no regex rules, no domain= options, no per-domain cosmetic rules; upgrade to adblock-rust via JNI if EasyList accuracy matters.
  */
 class FilterEngine {
@@ -33,7 +34,11 @@ class FilterEngine {
         val exception = rule.startsWith("@@")
         if (exception) rule = rule.substring(2)
         val d = rule.indexOf('$')
-        if (d >= 0) rule = rule.substring(0, d)
+        if (d >= 0) {
+            val opts = rule.substring(d + 1).lowercase()
+            if (SCOPED.any { opts.contains(it) }) return
+            rule = rule.substring(0, d)
+        }
         if (rule.isEmpty() || rule.startsWith("/") && rule.endsWith("/")) return
         rule = rule.lowercase()
         if (rule.startsWith("||")) {
@@ -85,4 +90,8 @@ class FilterEngine {
 
     /** CSS for generic element-hiding rules, or empty. */
     fun hidingCss(): String = if (hide.isEmpty()) "" else hide.joinToString(",") + "{display:none!important}"
+
+    private companion object {
+        val SCOPED = listOf("domain=", "rewrite=", "redirect", "popup", "csp=", "removeparam", "header=", "permissions=", "replace=", "badfilter")
+    }
 }
