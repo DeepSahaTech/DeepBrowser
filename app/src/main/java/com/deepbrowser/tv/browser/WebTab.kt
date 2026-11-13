@@ -81,9 +81,7 @@ class WebTab(
     override fun attachBridge(bridge: PageBridge) { this.bridge = bridge }
 
     private inner class JsBridge {
-        @JavascriptInterface fun snap(json: String) { main.post { bridge?.snap(json) } }
         @JavascriptInterface fun ime(fx: Float, fy: Float) { main.post { bridge?.ime(fx, fy) } }
-        @JavascriptInterface fun cur(x: Float, y: Float, w: Float, h: Float) { main.post { bridge?.cur(x, y, w, h) } }
     }
 
     private fun build(): WebView {

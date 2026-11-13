@@ -36,3 +36,11 @@ class Viewport {
         fun relative(viewWidth: Int): Float = viewWidth / LAYOUT_WIDTH.toFloat()
     }
 }
+
+/** Plain rectangle in view pixels. */
+data class Bounds(val l: Float, val t: Float, val r: Float, val b: Float) {
+    val cx get() = (l + r) / 2
+    val cy get() = (t + b) / 2
+    val w get() = r - l
+    val h get() = b - t
+}

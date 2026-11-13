@@ -175,9 +175,7 @@ class BrowserController(
 
     /** One bridge per tab. The page owns focus and the ring now: only text-field taps come back, from the active tab. */
     private fun bridgeFor(v: TabView) = object : PageBridge {
-        override fun snap(json: String) {}
         override fun ime(fx: Float, fy: Float) { if (isActive(v)) pointer.tapForKeyboard(fx, fy) }
-        override fun cur(x: Float, y: Float, w: Float, h: Float) {}
     }
 
     private fun inject(v: TabView) {

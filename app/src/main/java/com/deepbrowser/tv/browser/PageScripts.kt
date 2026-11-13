@@ -16,11 +16,6 @@ object PageScripts {
             "if(e.isContentEditable){document.execCommand('insertText',false,t);return 'ok'}return 'none'})($t)"
     }
 
-    fun videoJs(action: String): String =
-        "(function(){var v=[].slice.call(document.querySelectorAll('video'))" +
-            ".sort(function(a,b){return b.videoWidth*b.videoHeight-a.videoWidth*a.videoHeight})[0];" +
-            "if(!v)return;$action})()"
-
     fun errorPage(url: Uri, reason: String): String {
         val safeReason = android.text.Html.escapeHtml(reason)
         val safeUrl = android.text.Html.escapeHtml(url.toString())
