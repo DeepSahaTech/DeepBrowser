@@ -13,10 +13,17 @@
   // TV-native sites keep their own behaviour (SmartNav returned early on these too)
   if(/^https?:\/\/([a-z0-9-]+\.)*youtube\.com\/tv/i.test(location.href))return;
   function fsEl(){return document.fullscreenElement||document.webkitFullscreenElement||null;}
+  // Arrow keys now reach the page and also grant user activation, so only a recent OK/Enter or click counts as "user pressed Play"
+  // (otherwise hover-preview trailers on focused cards go fullscreen).
+  var pressAt=0;
+  window.addEventListener('keydown',function(e){if(e.isTrusted&&e.key==='Enter')pressAt=Date.now();},true);
+  window.addEventListener('click',function(e){if(e.isTrusted)pressAt=Date.now();},true);
   document.addEventListener('play',function(e){
     var v=e.target;
     if(!(v instanceof HTMLVideoElement)||fsEl())return;
-    if(navigator.userActivation&&!navigator.userActivation.isActive)return;
+    if(Date.now()-pressAt>4000)return;
+    if(v.muted||v.autoplay)return; // banner/preview trailers autoplay muted; a player the user started is not
+
     var r=v.getBoundingClientRect();
     if(r.width<240||r.height<135)return;
     var box=v,p=v.parentElement;

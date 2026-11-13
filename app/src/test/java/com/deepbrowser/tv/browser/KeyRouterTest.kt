@@ -11,7 +11,7 @@ class KeyRouterTest {
 
     // ---- Back
     @Test fun backFullscreenExitsOnUpOnly() {
-        val s = KeyState(fullscreen = true, fsControls = true)
+        val s = KeyState(fullscreen = true)
         assertEquals(Consume, r(down(Key.BACK), s)); assertEquals(ExitFullscreen, r(up(Key.BACK), s))
     }
     @Test fun backClosesPanelOrCommandBar() {
@@ -48,38 +48,31 @@ class KeyRouterTest {
         assertEquals(Pass, r(up(Key.OK), KeyState(overlayOpen = true)))
     }
     @Test fun okInCursorModeClicks() = assertEquals(OkUpClick, r(up(Key.OK), KeyState(cursorMode = true)))
-    @Test fun okFullscreenTogglesPlayWithoutControlsAndClicksWithThem() {
-        assertEquals(VideoToggle, r(down(Key.OK), KeyState(fullscreen = true)))
-        assertEquals(FsOk, r(up(Key.OK), KeyState(fullscreen = true, fsControls = true)))
+    @Test fun okLeavesFullscreenAsEnterOnRelease() {
+        val s = KeyState(fullscreen = true)
+        assertEquals(Consume, r(down(Key.OK), s)); assertEquals(Consume, r(down(Key.OK, repeat = 2), s))
+        assertEquals(OkUpSmart, r(up(Key.OK), s))
     }
 
     // ---- D-pad
-    @Test fun dpadPassesThroughOnNativeKeySites() {
-        val s = KeyState(nativeKeys = true)
-        assertEquals(Pass, r(down(Key.LEFT), s)); assertEquals(Pass, r(up(Key.OK), s)); assertEquals(Pass, r(down(Key.OK), s))
+    @Test fun dpadIsForwardedOnPagesAndInFullscreen() {
+        assertEquals(Forward, r(down(Key.RIGHT)))
+        assertEquals(Forward, r(down(Key.DOWN, repeat = 2)))
+        assertEquals(Forward, r(up(Key.DOWN)))
+        val fs = KeyState(fullscreen = true)
+        assertEquals(Forward, r(down(Key.LEFT), fs)); assertEquals(Forward, r(up(Key.UP), fs))
     }
-    @Test fun dpadMovesFocusAndFlagsRepeat() {
-        assertEquals(Nav(Dir.RIGHT, false), r(down(Key.RIGHT)))
-        assertEquals(Nav(Dir.DOWN, true), r(down(Key.DOWN, repeat = 2)))
-        assertEquals(Consume, r(up(Key.DOWN)))
+    @Test fun nativeKeysGetDpadAndOkForwarded() {
+        val s = KeyState(nativeKeys = true)
+        assertEquals(Forward, r(down(Key.LEFT), s)); assertEquals(Forward, r(up(Key.OK), s))
+        assertEquals(Forward, r(down(Key.OK), s))
     }
     @Test fun dpadInCursorModeMovesAndReleasesCursor() {
         val s = KeyState(cursorMode = true)
         assertEquals(MoveCursor(Dir.UP), r(down(Key.UP), s)); assertEquals(ReleaseCursor, r(up(Key.UP), s))
     }
     @Test fun homeDpadIsCompose() = assertEquals(Pass, r(down(Key.LEFT), KeyState(isHome = true)))
-    @Test fun fullscreenSeekAndReveal() {
-        val s = KeyState(fullscreen = true)
-        assertEquals(Seek(-10), r(down(Key.LEFT), s)); assertEquals(Seek(10), r(down(Key.RIGHT), s))
-        assertEquals(FsReveal, r(down(Key.UP), s)); assertEquals(Consume, r(up(Key.UP), s))
-    }
-    @Test fun fullscreenKeyReleasesNeverReachThePagePlayer() {
-        val s = KeyState(fullscreen = true)
-        for (k in listOf(Key.LEFT, Key.RIGHT, Key.UP, Key.DOWN, Key.OK)) assertEquals(Consume, r(up(k), s))
-    }
-
-    @Test fun fullscreenControlsNavigateThePlayerUi() =
-        assertEquals(FsNav(Dir.LEFT), r(down(Key.LEFT), KeyState(fullscreen = true, fsControls = true)))
+    @Test fun fullscreenOtherKeysPass() = assertEquals(Pass, r(down(Key.PAGE_DOWN), KeyState(fullscreen = true)))
     @Test fun pageKeysScroll() {
         assertEquals(Page(true), r(down(Key.PAGE_DOWN))); assertEquals(Page(false), r(down(Key.PAGE_UP)))
     }
@@ -101,6 +94,6 @@ class KeyRouterTest {
         val s = KeyState(cursorMode = true)
         assertEquals(MoveCursor(Dir.DOWN), r(down(Key.DOWN, repeat = 5), s))
         assertEquals(OkDown, r(down(Key.OK), s)); assertEquals(OkUpClick, r(up(Key.OK), s))
-        assertEquals(Pass, r(down(Key.UP), KeyState(cursorMode = true, nativeKeys = true)))
+        assertEquals(Forward, r(down(Key.UP), KeyState(cursorMode = true, nativeKeys = true)))
     }
 }

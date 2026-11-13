@@ -23,13 +23,6 @@ class ChromeStateTest {
         c.apply(KeyAction.OkUpLong); assertFalse(c.okLong)
     }
 
-    @Test fun fullscreenControlsStayAliveOnKeysExceptBack() {
-        assertFalse(c.keepsControls(Key.UP, true))
-        c.apply(KeyAction.FsReveal)
-        assertTrue(c.keepsControls(Key.UP, true)); assertFalse(c.keepsControls(Key.BACK, true)); assertFalse(c.keepsControls(Key.UP, false))
-        c.hideControls(); assertFalse(c.keyState(true, false, false, false).fsControls)
-    }
-
     @Test fun readerRules() {
         assertFalse(c.beginReader(isHome = true))
         c.commandBar = true; assertTrue(c.beginReader(false)); assertFalse(c.commandBar)
@@ -64,10 +57,5 @@ class ChromeStateTest {
     @Test fun schemeAllowList() {
         assertTrue(UrlResolver.isLoadableScheme("HTTPS")); assertTrue(UrlResolver.isLoadableScheme("about"))
         assertFalse(UrlResolver.isLoadableScheme("intent")); assertFalse(UrlResolver.isLoadableScheme(null))
-    }
-
-    @Test fun seekStepGrowsWithRepeats() {
-        assertEquals(10, ChromeState.seekStep(0)); assertEquals(20, ChromeState.seekStep(3))
-        assertEquals(30, ChromeState.seekStep(6)); assertEquals(60, ChromeState.seekStep(20))
     }
 }

@@ -16,7 +16,10 @@ object PageApi {
     fun scroll(d: Dir) = "window.__dbScroll&&window.__dbScroll('${d.js}')"
     fun reveal() = "window.__dbReveal&&window.__dbReveal()"
     fun ok() = "(window.__dbOk?window.__dbOk():'none')"
-    fun back() = "(window.__dbBack?window.__dbBack():'none')"
+    /** Asks the page first: replies [CLOSED] when it handled Back, "none" when Kotlin should go back in history. */
+    fun back() = "(window.__dbNav?window.__dbNav.back():'none')"
+    /** Turns the in-page navigation (and its focus ring) on or off. */
+    fun enable(on: Boolean) = "window.__dbNav&&window.__dbNav.enable($on)"
     /** Closes a player menu opened from the control bar; replies [CLOSED] or "none". */
     fun menuBack() = "(window.__dbMenuBack&&window.__dbMenuBack()?'closed':'none')"
     fun readerToggle() = ReaderMode.SCRIPT + ";window.__dbReader()"

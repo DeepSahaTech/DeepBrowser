@@ -2,7 +2,7 @@ package com.deepbrowser.tv.browser
 
 /**
  * Orders everything that must change together when the page under the user changes: the tab's url/progress, the
- * [Viewport]'s page, the focus ring ([resetFocus]), [ChromeState] (overlays, reader) and the injected scripts
+ * [Viewport]'s page, [ChromeState] (overlays, reader) and the injected scripts
  * ([inject]). Covers a new document, a requested load, going Home and entering/leaving/closing tabs.
  * Android-free: pages are reached through [TabView].
  */
@@ -10,7 +10,6 @@ class PageLifecycle(
     private val session: TabSession,
     private val chrome: ChromeState,
     private val viewport: Viewport,
-    private val resetFocus: () -> Unit,
     private val inject: (TabView) -> Unit,
     /** Closes the reader overlay in the page that is about to go to the background. */
     private val closeReader: () -> Unit,
@@ -20,7 +19,7 @@ class PageLifecycle(
 
     /** A document started loading in [v]; only the active tab's document touches shared state. */
     fun documentStarted(v: TabView, url: String?) {
-        if (v === tab.view) { tab.progress = 5; resetFocus(); viewport.page(url); chrome.documentChanged(); applyScale() }
+        if (v === tab.view) { tab.progress = 5; viewport.page(url); chrome.documentChanged(); applyScale() }
         inject(v)
     }
 
@@ -64,8 +63,8 @@ class PageLifecycle(
     /** The new active tab is live: re-aim scale/focus at its page. */
     private fun enter() {
         viewport.page(if (isHome) null else tab.url)
-        resetFocus(); applyScale(); chrome.tabEntered()
+        applyScale(); chrome.tabEntered()
         if (!tab.view.ready || isHome) return
-        inject(tab.view); tab.view.eval(PageApi.snap()); tab.view.focus()
+        inject(tab.view); tab.view.focus()
     }
 }

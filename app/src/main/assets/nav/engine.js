@@ -99,7 +99,21 @@
     }
     return null;
   }
-  function scopeRoot() { return fsRootEl() || modalEl() || doc.documentElement; }
+  // Plain-DIV overlay (no ARIA): a fixed ancestor of the centre hit that covers >= 40% of the viewport.
+  function overlayRoot() {
+    var el = hitAt(vw() / 2, vh() / 2);
+    if (!el) return null;
+    var top = null;
+    for (var p = el; !isBody(p); p = p.parentElement) {
+      if (styleOf(p).position === 'fixed') top = p;
+    }
+    if (!top) return null;
+    var r = rectOf(top);
+    if (!r || (r.r - r.l) * (r.b - r.t) < 0.4 * vw() * vh()) return null;
+    var list = Array.prototype.slice.call(top.querySelectorAll(SEL));
+    return list.some(isVisible) ? top : null;
+  }
+  function scopeRoot() { return fsRootEl() || modalEl() || overlayRoot() || doc.documentElement; }
   function largestVideo(R) {
     var list = Array.prototype.slice.call(R.querySelectorAll('video'));
     if (R.tagName === 'VIDEO') list.unshift(R);
@@ -152,6 +166,8 @@
     }
     var items = [];
     for (var i = 0; i < els.length; i++) {
+      // Outside fullscreen a video is a target only if it shows its own controls (banner trailers are not).
+      if (!full && els[i].tagName === 'VIDEO' && !els[i].controls) continue;
       var c = liveCandidate(els[i], full);
       if (c) items.push(c);
     }
@@ -176,7 +192,11 @@
   function initialPick(cands) {
     var VH = vh(), best = null, bestV = Infinity;
     var ok = cands.filter(function (c) { return viewFrac(c.rect) >= 0.5; });
-    var pref = ok.filter(function (c) { return cy(c.rect) > 0.18 * VH; });
+    // Skip fixed/sticky bars (site menus); a fixed screen band would also skip detail-page Play buttons near the top.
+    var pref = ok.filter(function (c) {
+      var r = c.rect, small = (r.b - r.t) < 0.08 * VH && r.t < 0.1 * VH; // top-bar icons (back, mute, logo)
+      return !inFixedOrSticky(c.el) && c.el.tagName !== 'VIDEO' && !small;
+    });
     if (pref.length) ok = pref;
     ok.forEach(function (c) {
       var v = c.rect.t * 2 + c.rect.l * 0.5;
@@ -529,6 +549,8 @@
       var R = scopeRoot(), full = !!fsRootEl(), cands = candidates(R, full);
       if (full && fullscreenKey(e, dir, a, R, cands)) return;
       var S = startFrom(a);
+      // A start outside the scope root (e.g. page behind an overlay) means no start: pick inside R.
+      if (S && S.el && R !== doc.documentElement && !R.contains(S.el)) S = null;
       if (!S) {
         var p = initialPick(cands);
         if (p) { focusEl(p.el); handled(e); }
@@ -588,12 +610,47 @@
         (doc.exitFullscreen || doc.webkitExitFullscreen).call(doc);
         return 'closed';
       }
-      if (!popupOpen()) return 'none';
+      if (!popupOpen()) {
+        var ov = overlayRoot();
+        if (!ov) return 'none';
+        return closeOverlay(ov);
+      }
       dismissPopup();
       return 'closed';
     } catch (e) {
       return 'none';
     }
+  }
+  // Escape, then a close control in the overlay's top-right quarter; focus returns to the opener.
+  function closeOverlay(ov) {
+    var a = doc.activeElement || null;
+    ['keydown', 'keyup'].forEach(function (t) {
+      [a, doc].forEach(function (target) {
+        if (!target) return;
+        try {
+          target.dispatchEvent(new KeyboardEvent(t, { key: 'Escape', code: 'Escape', keyCode: 27,
+            bubbles: true, cancelable: true }));
+        } catch (e) {}
+      });
+    });
+    if (ov.isConnected) {
+      var o = rectOf(ov), ow = o.r - o.l, oh = o.b - o.t, close = null;
+      var named = Array.prototype.slice.call(ov.querySelectorAll(
+        'button[aria-label*="close" i],[aria-label*="Close"],[class*="close" i]'));
+      close = named.filter(isVisible)[0] || null;
+      if (!close) {
+        var icons = Array.prototype.slice.call(ov.querySelectorAll('button,[role=button],a'));
+        close = icons.filter(function (e) {
+          var t = textOf(e), r = rectOf(e);
+          var glyph = t === '×' || t === '✕' ||
+            (!t && !!e.querySelector('svg'));
+          return glyph && r && isVisible(e) && cx(r) >= o.l + 0.75 * ow && cy(r) <= o.t + 0.25 * oh;
+        })[0] || null;
+      }
+      if (close) close.click();
+    }
+    if (last && last.el && last.el.isConnected && !ov.contains(last.el)) focusEl(last.el);
+    return 'closed';
   }
 
   // ---- control surface ----

@@ -34,6 +34,7 @@ class WebTab(
     private val context: Context,
     private val fullscreen: FullscreenSession,
     private val events: PageEvents,
+    private val scripts: NavScripts,
     private val config: () -> TabConfig,
 ) : TabView {
     private var wv: WebView? = null
@@ -81,7 +82,7 @@ class WebTab(
 
     private inner class JsBridge {
         @JavascriptInterface fun snap(json: String) { main.post { bridge?.snap(json) } }
-        @JavascriptInterface fun ime(x: Float, y: Float) { main.post { bridge?.ime(x, y) } }
+        @JavascriptInterface fun ime(fx: Float, fy: Float) { main.post { bridge?.ime(fx, fy) } }
         @JavascriptInterface fun cur(x: Float, y: Float, w: Float, h: Float) { main.post { bridge?.cur(x, y, w, h) } }
     }
 
@@ -96,6 +97,7 @@ class WebTab(
         // Hide AV1 (no hardware decoder on Fire TV sticks: shows a blue/green frame) so players pick VP9/H.264/HEVC.
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(v, PageScripts.CODEC_PATCH, setOf("*"))
+            WebViewCompat.addDocumentStartJavaScript(v, scripts.all, setOf("*"))
         }
         cfg.scalePercent?.let { v.setInitialScale(it) }
         return v

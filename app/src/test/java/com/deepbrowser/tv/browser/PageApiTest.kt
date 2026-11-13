@@ -13,7 +13,10 @@ class PageApiTest {
         assertEquals("window.__dbScroll&&window.__dbScroll('down')", PageApi.scroll(Dir.DOWN))
         assertEquals("window.__dbReveal&&window.__dbReveal()", PageApi.reveal())
         assertEquals("window.__dbReaderScroll&&window.__dbReaderScroll(-450)", PageApi.readerScroll(-450))
-        assertTrue(PageApi.ok().contains("__dbOk")); assertTrue(PageApi.back().contains("__dbBack"))
+        assertTrue(PageApi.ok().contains("__dbOk"))
+        assertEquals("(window.__dbNav?window.__dbNav.back():'none')", PageApi.back())
+        assertEquals("window.__dbNav&&window.__dbNav.enable(true)", PageApi.enable(true))
+        assertEquals("window.__dbNav&&window.__dbNav.enable(false)", PageApi.enable(false))
         assertTrue(PageApi.menuBack().contains("__dbMenuBack")); assertTrue(PageApi.readerClose().contains("__dbReader"))
         assertTrue(PageApi.readerToggle().endsWith(";window.__dbReader()"))
     }

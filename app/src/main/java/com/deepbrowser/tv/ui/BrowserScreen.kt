@@ -26,11 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
 import com.deepbrowser.tv.browser.FocusOwner
 import androidx.compose.runtime.withFrameNanos
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.getValue
-import androidx.compose.animation.core.animateRectAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -86,21 +82,6 @@ fun BrowserScreen(c: BrowserController) {
                 onInfo = { c.infoVisible = true },
                 onPanel = c::openPanel,
             ) else Box(Modifier.fillMaxSize().background(backdropBrush())) // a layer above owns the remote: Home stays out of the focus tree
-        }
-
-        val ring = c.focusRect
-        if (ring != null && !c.isHome && c.ringVisible) {
-            val r by animateRectAsState(ring, spring(dampingRatio = 0.85f, stiffness = 900f), label = "focusRing")
-            val d = LocalDensity.current
-            val pad = 4.dp
-            val shape = RoundedCornerShape(12.dp)
-            Box(
-                Modifier
-                    .offset { IntOffset(r.left.roundToInt() - pad.roundToPx(), r.top.roundToInt() - pad.roundToPx()) }
-                    .size(with(d) { r.width.toDp() + pad * 2 }, with(d) { r.height.toDp() + pad * 2 })
-                    .background(Palette.Accent.copy(alpha = 0.14f), shape)
-                    .border(4.dp, Palette.Accent, shape),
-            )
         }
 
         if (!c.isHome && c.pointerVisible) {

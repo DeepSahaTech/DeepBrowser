@@ -7,7 +7,6 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
-import androidx.compose.ui.geometry.Rect
 
 /** Adapter: synthesises touches / hover on the active WebView (script clicks are not user gestures; real touches are). */
 class PointerInjector(
@@ -26,20 +25,13 @@ class PointerInjector(
         d.recycle(); u.recycle()
     }
 
-    /** Touch the centre of the focus ring (view px). */
-    fun tapRing(r: Rect?): Boolean {
-        r ?: return false
+    /** A real tap on a text field gives WebView the user gesture it needs to raise the TV keyboard. [fx], [fy] are viewport fractions. */
+    fun tapForKeyboard(fx: Float, fy: Float) {
         val w = web()
-        tap(((r.left + r.right) / 2).coerceIn(2f, (w.width - 2).toFloat()), ((r.top + r.bottom) / 2).coerceIn(2f, (w.height - 2).toFloat()), 60)
-        return true
-    }
-
-    /** A real tap on a text field gives WebView the user gesture it needs to raise the TV keyboard. */
-    fun tapForKeyboard(cssX: Float, cssY: Float, scale: Float) {
-        tap(cssX * scale, cssY * scale, 50)
+        tap(fx * w.width, fy * w.height, 50)
         main.postDelayed({
-            val w = web()
-            (w.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(w, InputMethodManager.SHOW_IMPLICIT)
+            val v = web()
+            (v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
         }, 150)
     }
 
