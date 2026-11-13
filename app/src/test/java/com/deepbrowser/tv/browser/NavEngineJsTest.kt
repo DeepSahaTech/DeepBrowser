@@ -20,7 +20,8 @@ class NavEngineJsTest {
         val node = findNode()
         Assume.assumeTrue(node != null)
         // Node 24 rejects a bare directory for --test, so name the test file.
-        val process = ProcessBuilder(node, "--test", "../tools/navtest/core.test.mjs")
+        val process = ProcessBuilder(node, "--test",
+            "../tools/navtest/core.test.mjs", "../tools/navtest/engine-smoke.test.mjs")
             .directory(File("."))
             .redirectErrorStream(true)
             .start()
