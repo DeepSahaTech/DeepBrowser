@@ -107,6 +107,13 @@
     return items.filter(function (_, k) { return !drop[k]; });
   }
 
+  // First-tier target: a text link/button of any size, or a text-less control whose shorter side is >= 28 CSS px.
+  // Text-less slide dots and indicator pills (24 px tall) lose the first pick tier.
+  function roomy(r, hasText) {
+    if (hasText) return area(r) >= 100;
+    return Math.min(r.r - r.l, r.b - r.t) >= 28;
+  }
+
   // Fraction of the rect's width inside the horizontal viewport [0, VW].
   function visibleFraction(r, VW) {
     var w = r.r - r.l;
@@ -150,6 +157,7 @@
     pick: pick,
     dedupe: dedupe,
     visibleFraction: visibleFraction,
+    roomy: roomy,
     okAction: okAction,
     seekStep: seekStep,
     isMetaText: isMetaText,

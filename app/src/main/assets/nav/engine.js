@@ -30,6 +30,9 @@
   var playerUp = {};               // keys consumed in the capture pass; their keyup is swallowed there
   var ids = new WeakMap(), nextId = 1, warmed = {};
   var ringEl = null, ringShown = false, ringKey = '';
+  var returnTo = null;             // {el, rect} of the last OK: where focus goes back when what it opened closes
+  var wasMode = false;             // videoMode() on the previous frame
+  var inFrame = window !== window.top;   // iframes draw the ring only while they hold document focus
 
   // ---- small DOM helpers (every call tolerates missing APIs) ----
   function vw() { return window.innerWidth || doc.documentElement.clientWidth || 0; }
@@ -147,7 +150,9 @@
   function playerVideo() {
     var best = null, bestF = 0.8;
     Array.prototype.forEach.call(doc.querySelectorAll('video'), function (v) {
-      if (v.muted && v.autoplay) return;
+      // Only a video the user started (flagged by tweaks.js on a real OK/click) is a player; a full-width
+      // banner trailer the site autoplays is not, even when unmuted.
+      if (!v.__dbUser) return;
       var r = rectOf(v), f = r ? clipFrac(r) : 0;
       if (f >= bestF && isVisible(v)) { bestF = f; best = v; }
     });
@@ -328,6 +333,8 @@
     if (typeof doc.elementFromPoint !== 'function') return true;
     var r = p.rect, VW = vw(), VH = vh();
     if (r.b <= 0 || r.t >= VH || r.r <= 0 || r.l >= VW) return true;   // off-screen: nothing to test
+    // Partly off-screen: it gets scrolled into view, and its visible sliver may sit under a fixed header.
+    if (r.t < 0 || r.b > VH) return true;
     // Three points down the centre line: a fixed header can cover the top of a partly scrolled row.
     var x = (Math.max(r.l, 0) + Math.min(r.r, VW)) / 2;
     var t = Math.max(r.t, 0), b = Math.min(r.b, VH);
@@ -344,7 +351,7 @@
     }
     return false;
   }
-  function choose(dir, S, list) {
+  function pickOnce(dir, S, list) {
     // Player controls overlay the video and toggle pointer-events while fading, so a hit test would reject them.
     if (videoMode()) return core.pick(dir, S.rect, list);
     for (var tries = 0; tries < 10 && list.length; tries++) {
@@ -354,6 +361,18 @@
       list = list.filter(function (c) { return c !== p; });
     }
     return null;
+  }
+  // Two tiers: tiny targets (slide dots, 24 px icons) only win when no normal-sized target lies that way.
+  function choose(dir, S, list) {
+    // Cards scrolled out sideways in a row/carousel are reachable only by Left/Right, never by Up/Down.
+    if (dir === 'up' || dir === 'down') {
+      var VW = vw();
+      list = list.filter(function (c) { return core.visibleFraction(c.rect, VW) >= 0.5; });
+    }
+    var big = list.filter(function (c) { return isTextEl(c.el) || core.roomy(c.rect, !!textOf(c.el)); });
+    var p = pickOnce(dir, S, big);
+    if (!p && big.length < list.length) p = pickOnce(dir, S, list);
+    return p;
   }
   function fresh(list) {
     var out = [];
@@ -473,14 +492,27 @@
     if (!t && hit && hit.querySelector) t = hit.querySelector(SEL);
     if (t && t !== last.el) focusEl(t, true);
   }
+  function docFocused() {
+    try { return typeof doc.hasFocus !== 'function' || doc.hasFocus(); } catch (e) { return false; }
+  }
   function frame() {
     var el = last && last.el, now = Date.now();
+    var inMode = !!videoMode(), closedPlayer = wasMode && !inMode;
+    wasMode = inMode;
     if (el) {
       if (el.isConnected) last.rect = rectOf(el) || last.rect;
-      if (!el.isConnected || (now - lastKeyAt > 600 && (!last.rect || viewFrac(last.rect) < 0.5))) carry();
+      // The player just closed and took focus with it: return to the control OK pressed, not a neighbour.
+      if (closedPlayer && (!el.isConnected || !isVisible(el)) && returnTo &&
+          returnTo.el.isConnected && isVisible(returnTo.el)) {
+        var back = returnTo.el;
+        returnTo = null;
+        focusEl(back, true);
+      } else if (!el.isConnected || (now - lastKeyAt > 600 && (!last.rect || viewFrac(last.rect) < 0.5))) {
+        carry();
+      }
     }
     el = last && last.el;
-    if (el && el.isConnected && doc.activeElement === el && last.rect) drawRing(last.rect);
+    if (el && el.isConnected && doc.activeElement === el && last.rect && (!inFrame || docFocused())) drawRing(last.rect);
     else hideRing();
   }
   // Requests a frame only while enabled; the loop stops itself when disabled.
@@ -518,6 +550,7 @@
   }
   function onOk(e) {
     var T = doc.activeElement || null, R = scopeRoot(), mode = videoMode(), full = !!mode;
+    if (!isBody(T)) returnTo = { el: T, rect: rectOf(T) };
     var cands = candidates(R, full);
     // Player or fullscreen: OK on BODY or the video toggles play whatever the controls' visibility.
     if (full && mode.video && (isBody(T) || T === mode.video)) {
@@ -696,6 +729,26 @@
       focusEl(last.el);
     }
   }
+  // Focus goes back to returnTo once (the site re-renders first, hence the delay); ms = 150 popups, 400 player exit.
+  function restoreReturn(ms) {
+    var rt = returnTo;
+    returnTo = null;
+    if (!rt) return;
+    var tries = 0;
+    (function attempt() {
+      setTimeout(function () {
+        var el = rt.el, R = scopeRoot();
+        // Sites often re-render the opener when a popup or player closes: use the control now at its old spot.
+        if ((!el || !el.isConnected) && rt.rect) {
+          var hit = hitAt(cx(rt.rect), cy(rt.rect));
+          el = hit && (hit.closest ? hit.closest(SEL) : null);
+        }
+        if (el && el.isConnected && liveCandidate(el, true) && R && R.contains(el)) { focusEl(el, true); return; }
+        // The popup may still be fading out (scope is still the popup): retry for about a second.
+        if (++tries < 7) attempt();
+      }, tries ? 150 : ms);
+    })();
+  }
   // Page player: Escape the open site menu; if it stays visible, click its opener, then refocus the opener.
   function closePlayerMenu(op) {
     var a = doc.activeElement || null;
@@ -707,6 +760,7 @@
     });
     if (a && a.isConnected && typeof a.checkVisibility === 'function' && a.checkVisibility()) op.click();
     focusEl(op);
+    restoreReturn(150);
     return 'closed';
   }
   // Focus sits inside the player but outside its bottom control row, so a site menu is open.
@@ -754,7 +808,7 @@
       if (mode && mode.player) {
         if (op && op.isConnected && focusInPlayerMenu(mode.root, op)) return closePlayerMenu(op);
         var exit = playerExitEl(mode.root);
-        if (exit) { pressEl(exit); return 'closed'; }
+        if (exit) { pressEl(exit); restoreReturn(400); return 'closed'; }
         // Sites remove the idle top bar from the DOM: wake the controls and click the arrow once it is back.
         // A second Back within 2 s with nothing found falls through, so Back can never get stuck here.
         var now = Date.now();
@@ -763,7 +817,7 @@
           wake(mode.root);
           setTimeout(function () {
             var m = videoMode(), e = m && m.player ? playerExitEl(m.root) : null;
-            if (e) pressEl(e);
+            if (e) { pressEl(e); restoreReturn(400); }
           }, 300);
           return 'closed';
         }
@@ -780,6 +834,7 @@
         return closeOverlay(ov);
       }
       dismissPopup();
+      restoreReturn(150);
       return 'closed';
     } catch (e) {
       return 'none';
@@ -814,6 +869,7 @@
       if (close) close.click();
     }
     if (last && last.el && last.el.isConnected && !ov.contains(last.el)) focusEl(last.el);
+    restoreReturn(150);
     return 'closed';
   }
 
@@ -822,6 +878,11 @@
     enabled = !!on;
     if (enabled) startLoop();
     else hideRing();
+    // Iframes do not hear from the app, so the top frame relays the switch down the tree.
+    var fr = doc.querySelectorAll('iframe');
+    for (var i = 0; i < fr.length; i++) {
+      try { fr[i].contentWindow.postMessage({ __dbnav: 'enable', on: enabled }, '*'); } catch (e) { /* cross-origin or detached */ }
+    }
   }
   // Debug JSON for CDP probes (D.13).
   function debug(dir) {
@@ -857,6 +918,11 @@
   window.addEventListener('keyup', onPlayerKeyUp, true);
   doc.addEventListener('fullscreenchange', moveRing);
   doc.addEventListener('webkitfullscreenchange', moveRing);
+  window.addEventListener('message', function (e) {
+    try {
+      if (e.data && e.data.__dbnav === 'enable' && e.source === window.parent) enable(e.data.on);
+    } catch (err) { /* foreign messages are ignored */ }
+  });
   window.__dbNav = { back: back, enable: enable, debug: debug };
   window.__dbBack = back;   // legacy alias used by Kotlin until WP4
   startLoop();

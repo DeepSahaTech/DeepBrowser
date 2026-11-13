@@ -21,8 +21,9 @@
   document.addEventListener('play',function(e){
     var v=e.target;
     if(!(v instanceof HTMLVideoElement)||fsEl())return;
-    if(Date.now()-pressAt>4000)return;
-    if(v.muted||v.autoplay)return; // banner/preview trailers autoplay muted; a player the user started is not
+    if(Date.now()-pressAt>10000)return; // slow players start after the press
+    if(v.muted||v.loop)return; // banner/preview trailers autoplay muted or looping; a player the user started is not
+    v.__dbUser=true; // the nav engine treats only user-started videos as players (not unmuted banner trailers)
 
     var r=v.getBoundingClientRect();
     if(r.width<240||r.height<135)return;

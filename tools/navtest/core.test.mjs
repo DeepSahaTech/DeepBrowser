@@ -152,3 +152,11 @@ test('(13) isMetaText accepts short metadata and rejects action labels', () => {
   assert.equal(core.isMetaText('More info', 30), false);
   assert.equal(core.isMetaText('7.7', 60), false);
 });
+
+test('(14) roomy keeps text links and real icon buttons, rejects text-less slide dots and pills', () => {
+  assert.equal(core.roomy(rect(0, 0, 30, 30), false), true);     // icon button
+  assert.equal(core.roomy(rect(0, 0, 24, 24), false), false);    // slide dot
+  assert.equal(core.roomy(rect(0, 0, 46, 24), false), false);    // active slide pill
+  assert.equal(core.roomy(rect(0, 0, 90, 20), true), true);      // inline text link
+  assert.equal(core.roomy(rect(10, 10, 10, 10), true), false);
+});
