@@ -36,6 +36,12 @@ class FilterEngineTest {
         assertFalse(e.shouldBlock("https://site.org/clean.png"))
     }
 
+    @Test fun ruleLimitedToOtherSitesIsSkipped() {
+        val f = FilterEngine().apply { load("||googlevideo.com/videoplayback?${'$'}rewrite=abp-resource:blank-mp4,domain=a.com|b.com\n||ads.net^${'$'}third-party") }
+        assertFalse(f.shouldBlock("https://rr7---sn-x.googlevideo.com/videoplayback?expire=1&id=2"))
+        assertTrue(f.shouldBlock("https://ads.net/x.js"))
+    }
+
     @Test fun cosmeticCss() {
         assertEquals(".ad-box{display:none!important}", e.hidingCss())
     }
