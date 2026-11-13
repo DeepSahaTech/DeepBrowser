@@ -98,6 +98,11 @@ object KeyRouter {
             Key.OK -> return KeyAction.VideoToggle
             else -> {}
         }
+        // The page's own player also reacts to the key release (seek, toggle): swallow it so one press does one thing.
+        if (!k.down) when (k.key) {
+            Key.UP, Key.DOWN, Key.LEFT, Key.RIGHT, Key.OK -> return KeyAction.Consume
+            else -> {}
+        }
         return KeyAction.Pass
     }
 

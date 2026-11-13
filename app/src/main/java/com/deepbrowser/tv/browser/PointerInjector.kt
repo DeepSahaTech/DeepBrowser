@@ -45,26 +45,26 @@ class PointerInjector(
 
     fun click() = tap(cursor.x, cursor.y, 60)
 
-    /** Move the cursor one step; at a screen edge scroll the page instead, otherwise hover. */
-    fun moveCursor(dir: Dir) {
-        val dx = when (dir) { Dir.LEFT -> -1; Dir.RIGHT -> 1; else -> 0 }
-        val dy = when (dir) { Dir.UP -> -1; Dir.DOWN -> 1; else -> 0 }
-        val edge = cursor.step(dx, dy)
-        val step = (cursor.currentSpeed * 1.5f).toInt()
+    /** One animation frame of held-key movement: scroll when pushing an edge, otherwise hover under the pointer. */
+    fun frame(dtMs: Float) {
+        val dx = cursor.x; val dy = cursor.y
+        val edge = cursor.tick(dtMs)
         val w = web()
+        val step = (cursor.lastStepPx * 1.2f).toInt().coerceAtLeast(1)
         when (edge) {
             Edge.TOP -> w.scrollBy(0, -step)
             Edge.BOTTOM -> w.scrollBy(0, step)
             Edge.LEFT -> w.scrollBy(-step, 0)
             Edge.RIGHT -> w.scrollBy(step, 0)
-            Edge.NONE -> hover(w)
+            Edge.NONE -> {}
         }
+        if (edge == Edge.NONE && (dx != cursor.x || dy != cursor.y)) hover(w)
     }
 
     /** Synthesised mouse-hover so menus and tooltips that open on hover work. */
     private fun hover(w: View) {
         val now = SystemClock.uptimeMillis()
-        if (now - lastHover < 80) return
+        if (now - lastHover < 33) return
         lastHover = now
         val ev = MotionEvent.obtain(now, now, MotionEvent.ACTION_HOVER_MOVE, cursor.x, cursor.y, 0)
         ev.source = InputDevice.SOURCE_MOUSE

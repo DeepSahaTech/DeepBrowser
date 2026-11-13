@@ -15,6 +15,7 @@ class FocusNav(
     private val evalJs: (String) -> Unit,
     private val viewWidth: () -> Int,
     private val onRing: (Rect?) -> Unit,
+    private val onSeek: (forward: Boolean) -> Unit = {},
 ) {
     private var items = emptyList<NavItem>()
     private var viewH = Viewport.SCREEN_H.toFloat()
@@ -29,6 +30,9 @@ class FocusNav(
     private val flush = Runnable { sendSel() }
 
     private fun Bounds.rect() = Rect(l, t, r, b)
+
+    /** The player's timeline is selected: Left/Right seek, OK toggles play. */
+    val sliderFocused: Boolean get() = items.firstOrNull { it.id == curId }?.slider == true
 
     fun reset() { items = emptyList(); curId = -1; pendingDir = null; anchorX = Float.NaN; onRing(null) }
 
@@ -45,7 +49,8 @@ class FocusNav(
             onRing(it.box.rect())
             if (anchorFromCur) anchorX = it.cx
         } ?: onRing(null)
-        pendingDir?.let { pendingDir = null; move(it, fromSnapshot = true) }
+        // after a reveal the player's controls arrive in a later snapshot: a lone element (the video) is not the answer yet
+        pendingDir?.let { if (it == "init" && items.size < 2) return; pendingDir = null; move(it, fromSnapshot = true) }
     }
 
     /** Scroll tracking: the focused element moved because the page scrolled. */
@@ -59,6 +64,7 @@ class FocusNav(
         val cur = items.firstOrNull { it.id == curId }
         val d = Dir.parse(dir) // null for "init" (after reveal): re-pick the first target
         if (cur == null || d == null) { Spatial.initial(items, viewH)?.let { select(it, dir) }; return true }
+        if (cur.slider && (d == Dir.LEFT || d == Dir.RIGHT)) { onSeek(d == Dir.RIGHT); return true }
         if (d == Dir.UP || d == Dir.DOWN) { if (anchorX.isNaN()) anchorX = cur.cx }
         when (val r = Spatial.decide(items, cur, d, anchorX, carousels, viewWidth())) {
             is NavResult.Move -> select(r.item, dir)
@@ -71,7 +77,7 @@ class FocusNav(
     fun reveal() { evalJs("window.__dbReveal&&window.__dbReveal()"); pendingDir = "init" }
 
     private fun select(it: NavItem, dir: String?) {
-        if (dir == "left" || dir == "right") { anchorX = it.cx; anchorFromCur = true } else if (dir == "up" || dir == "down") anchorFromCur = false
+        if (dir == "left" || dir == "right") { anchorX = it.cx; anchorFromCur = true } else if (dir == "up" || dir == "down") { anchorFromCur = false; if (anchorX.isNaN() || anchorX < it.box.l || anchorX > it.box.r) anchorX = it.cx }
         curId = it.id
         onRing(it.box.rect())
         queuedId = it.id

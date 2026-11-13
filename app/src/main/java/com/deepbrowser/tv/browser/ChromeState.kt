@@ -70,6 +70,8 @@ class ChromeState {
     fun zoom(delta: Int): Int { zoomPercent = (zoomPercent + delta).coerceIn(MIN_ZOOM, MAX_ZOOM); return zoomPercent }
 
     companion object {
+        /** Seconds per timeline press after [run] quick repeats: 10, 10, 10, 20, 30, 60. */
+        fun seekStep(run: Int): Int = when { run < 3 -> 10; run < 5 -> 20; run < 8 -> 30; else -> 60 }
         const val OK_LONG_MS = 600L
         const val FS_CONTROLS_MS = 6000L
         const val MIN_ZOOM = 50
