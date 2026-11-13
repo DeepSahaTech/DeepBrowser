@@ -8,9 +8,8 @@ import androidx.compose.runtime.setValue
 
 /** What the page reports back through the injected JS bridge (already on the main thread). */
 interface PageBridge {
-    fun snap(json: String)
-    fun ime(x: Float, y: Float)
-    fun cur(x: Float, y: Float, w: Float, h: Float)
+    /** Tap this point, given as fractions of the viewport, so the TV keyboard opens. */
+    fun ime(fx: Float, fy: Float)
 }
 
 /** What a tab's page-load machinery reports upward; one implementation is shared by every tab. */

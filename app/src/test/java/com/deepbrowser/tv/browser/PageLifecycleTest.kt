@@ -35,7 +35,7 @@ class PageLifecycleTest {
     private val chrome = ChromeState()
     private val viewport = Viewport().also { it.resize(1920, 1080) }
     private val session = TabSession({ FakeView().also { views += it } })
-    private val life = PageLifecycle(session, chrome, viewport, { order += "focus-reset" }, { order += "inject" }, { order += "close-reader" })
+    private val life = PageLifecycle(session, chrome, viewport, { order += "inject" }, { order += "close-reader" })
 
     private fun openReader() { chrome.beginReader(false); chrome.readerResult("\"on\"") }
 
@@ -44,7 +44,7 @@ class PageLifecycleTest {
         life.documentStarted(views[0], "https://a.test/")
         assertEquals(5, session.active.progress); assertFalse(chrome.reader)
         assertEquals("https://a.test/", viewport.pageUrl)
-        assertEquals(listOf("focus-reset", "inject"), order)
+        assertEquals(listOf("inject"), order)
         assertTrue(views[0].log.contains("scale:150"))
     }
 
@@ -78,16 +78,16 @@ class PageLifecycleTest {
     @Test fun newTabClosesReaderThenEntersTheEmptyTab() {
         openReader(); session.active.url = "https://a.test/"
         life.newTab()
-        assertEquals(listOf("close-reader", "focus-reset"), order)
+        assertEquals(listOf("close-reader"), order)
         assertEquals(2, session.tabs.size); assertTrue(life.isHome); assertNull(viewport.pageUrl); assertFalse(chrome.reader)
     }
 
-    @Test fun enteringALiveTabInjectsSnapshotsAndFocuses() {
+    @Test fun enteringALiveTabInjectsAndFocuses() {
         life.newTab(); session.active.url = "https://b.test/"; life.switchTo(0); order.clear()
         session.active.url = "https://a.test/"; life.switchTo(1)
         assertEquals("https://b.test/", viewport.pageUrl)
-        assertEquals(listOf("focus-reset", "inject"), order)
-        assertEquals(listOf("eval:${PageApi.snap()}", "focus"), views[1].log.takeLast(2))
+        assertEquals(listOf("inject"), order)
+        assertEquals("focus", views[1].log.last())
     }
 
     @Test fun switchToSameTabJustClosesThePanel() {
@@ -104,7 +104,7 @@ class PageLifecycleTest {
     @Test fun closingTheActiveTabEntersTheNeighbour() {
         life.newTab(); order.clear()
         life.closeTab(1)
-        assertEquals(1, session.tabs.size); assertEquals(listOf("focus-reset"), order)
+        assertEquals(1, session.tabs.size); assertTrue(order.isEmpty())
     }
 
     @Test fun tabLimitIsRespected() {

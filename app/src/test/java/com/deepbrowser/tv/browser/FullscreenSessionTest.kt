@@ -17,31 +17,7 @@ class FullscreenSessionTest {
     }
 
     private val surface = FakeSurface()
-    private val chrome = ChromeState()
-    private val clock = FakeScheduler()
-    private val fs = FullscreenSession(surface, chrome, clock)
-
-    @Test fun controlsHideSixSecondsAfterTheLastRequest() {
-        surface.open = true
-        chrome.apply(KeyAction.FsReveal); fs.armHide()
-        clock.advance(5_999); assertTrue(chrome.fsControls)
-        clock.advance(1); assertFalse(chrome.fsControls)
-    }
-
-    @Test fun keyActivityRearmsTheTimerExceptBack() {
-        surface.open = true
-        chrome.apply(KeyAction.FsReveal); fs.armHide()
-        clock.advance(4_000); fs.onKey(Key.UP)
-        clock.advance(4_000); assertTrue(chrome.fsControls)
-        clock.advance(2_000); assertFalse(chrome.fsControls)
-        chrome.apply(KeyAction.FsReveal); fs.armHide(); fs.onKey(Key.BACK)
-        assertEquals(1, clock.pending)
-    }
-
-    @Test fun keysWithoutVisibleControlsOrOutsideFullscreenDoNotArm() {
-        surface.open = true; fs.onKey(Key.UP); assertEquals(0, clock.pending)
-        surface.open = false; chrome.apply(KeyAction.FsReveal); fs.onKey(Key.UP); assertEquals(0, clock.pending)
-    }
+    private val fs = FullscreenSession(surface)
 
     @Test fun requestExitLeavesFullscreenOnlyWhenThePageClosedNothing() {
         surface.open = true

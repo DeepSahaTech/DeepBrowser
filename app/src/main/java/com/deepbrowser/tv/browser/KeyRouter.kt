@@ -12,12 +12,11 @@ data class KeyIn(val key: Key, val down: Boolean, val repeat: Int = 0)
 /** Everything the decision needs to know about the browser right now. */
 data class KeyState(
     val fullscreen: Boolean = false,
-    val fsControls: Boolean = false,
     val imeVisible: Boolean = false,
     val overlayOpen: Boolean = false, // command bar, device info or a panel
     val isHome: Boolean = false,
     val readerOn: Boolean = false,
-    val nativeKeys: Boolean = false, // TV-native site: the page handles the D-pad itself
+    val nativeKeys: Boolean = false, // TV-native site: the page handles the D-pad and OK itself
     val cursorMode: Boolean = false,
     val okLongFired: Boolean = false,
 )
@@ -25,32 +24,26 @@ data class KeyState(
 sealed interface KeyAction {
     object Pass : KeyAction           // not ours: let the system / Compose handle it
     object Consume : KeyAction        // swallow, do nothing
+    object Forward : KeyAction        // hand the same key event to the page (or the fullscreen view); the in-page engine acts
     object ExitFullscreen : KeyAction
-    object FsReveal : KeyAction       // first Up/Down in fullscreen: show the site's player controls
-    data class FsNav(val dir: Dir) : KeyAction
-    object FsOk : KeyAction
-    data class Seek(val seconds: Int) : KeyAction
-    object VideoToggle : KeyAction
     object CloseOverlays : KeyAction
     object OpenCommandBar : KeyAction
     object ExitReader : KeyAction
     data class ReaderScroll(val delta: Int) : KeyAction
     data class BackPage(val native: Boolean) : KeyAction // native: skip the page's own "close popover" step
-    data class Nav(val dir: Dir, val repeat: Boolean) : KeyAction
     data class MoveCursor(val dir: Dir) : KeyAction
     object ReleaseCursor : KeyAction
     object OkDown : KeyAction         // first press: arm the long-press timer
     object OkUpLong : KeyAction       // release after the long press already fired
     object OkUpClick : KeyAction      // release in cursor mode: click under the cursor
-    object OkUpSmart : KeyAction      // release in focus mode: tap the focus ring
+    object OkUpSmart : KeyAction      // release in focus mode: send a real Enter to the page
     data class Page(val down: Boolean) : KeyAction
 }
 
 /** The remote's decision tree as a pure function; the controller only executes the returned action. */
 object KeyRouter {
     fun route(k: KeyIn, s: KeyState): KeyAction {
-        val dir = dirOf(k.key)
-        if (s.fullscreen) return fullscreen(k, s, dir)
+        if (s.fullscreen) return fullscreen(k, s)
         // The long press already opened the command bar: swallow the rest of that press so its release cannot click an item.
         if (k.key == Key.OK && s.okLongFired) return if (k.down) KeyAction.Consume else KeyAction.OkUpLong
         if (s.imeVisible) return KeyAction.Pass
@@ -65,13 +58,12 @@ object KeyRouter {
         return when (k.key) {
             Key.BACK -> if (!k.down) KeyAction.BackPage(s.nativeKeys) else KeyAction.Consume
             Key.UP, Key.DOWN, Key.LEFT, Key.RIGHT -> when {
-                s.nativeKeys -> KeyAction.Pass
-                s.cursorMode -> if (k.down) KeyAction.MoveCursor(dir!!) else KeyAction.ReleaseCursor
-                k.down -> KeyAction.Nav(dir!!, k.repeat > 0)
-                else -> KeyAction.Consume
+                s.nativeKeys -> KeyAction.Forward
+                s.cursorMode -> if (k.down) KeyAction.MoveCursor(dirOf(k.key)!!) else KeyAction.ReleaseCursor
+                else -> KeyAction.Forward // page focus: the in-page engine moves the ring, key time
             }
             Key.OK -> when {
-                s.nativeKeys -> KeyAction.Pass
+                s.nativeKeys -> KeyAction.Forward
                 k.down -> if (k.repeat == 0) KeyAction.OkDown else KeyAction.Consume
                 s.okLongFired -> KeyAction.OkUpLong
                 s.cursorMode -> KeyAction.OkUpClick
@@ -83,26 +75,22 @@ object KeyRouter {
         }
     }
 
-    private fun fullscreen(k: KeyIn, s: KeyState, dir: Dir?): KeyAction {
-        if (k.key == Key.BACK) return if (!k.down) KeyAction.ExitFullscreen else KeyAction.Consume
-        if (s.fsControls) when (k.key) {
-            Key.UP, Key.DOWN, Key.LEFT, Key.RIGHT -> return if (k.down) KeyAction.FsNav(dir!!) else KeyAction.Consume
-            Key.OK -> return if (!k.down) KeyAction.FsOk else KeyAction.Consume
-            else -> {}
+    private fun fullscreen(k: KeyIn, s: KeyState): KeyAction = when (k.key) {
+        Key.BACK -> if (!k.down) KeyAction.ExitFullscreen else KeyAction.Consume
+        // Pointer mode wins in fullscreen too, with the same actions as the page path.
+        Key.UP, Key.DOWN, Key.LEFT, Key.RIGHT -> when {
+            s.cursorMode -> if (k.down) KeyAction.MoveCursor(dirOf(k.key)!!) else KeyAction.ReleaseCursor
+            else -> KeyAction.Forward
         }
-        if (k.down) when (k.key) {
-            Key.UP, Key.DOWN -> return KeyAction.FsReveal
-            Key.LEFT -> return KeyAction.Seek(-10)
-            Key.RIGHT -> return KeyAction.Seek(10)
-            Key.OK -> return KeyAction.VideoToggle
-            else -> {}
+        Key.OK -> when {
+            s.cursorMode -> when {
+                k.down -> if (k.repeat == 0) KeyAction.OkDown else KeyAction.Consume
+                s.okLongFired -> KeyAction.OkUpLong
+                else -> KeyAction.OkUpClick
+            }
+            else -> if (!k.down) KeyAction.OkUpSmart else KeyAction.Consume // OK acts once, on release, as Enter
         }
-        // The page's own player also reacts to the key release (seek, toggle): swallow it so one press does one thing.
-        if (!k.down) when (k.key) {
-            Key.UP, Key.DOWN, Key.LEFT, Key.RIGHT, Key.OK -> return KeyAction.Consume
-            else -> {}
-        }
-        return KeyAction.Pass
+        else -> KeyAction.Pass
     }
 
     private fun dirOf(k: Key): Dir? = when (k) {

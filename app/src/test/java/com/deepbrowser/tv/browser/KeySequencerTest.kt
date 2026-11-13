@@ -9,20 +9,15 @@ import org.junit.Test
 class KeySequencerTest {
     private class Recorder : KeyEffects {
         val log = ArrayList<String>()
-        override fun keyTouched(key: Key) {}
         override fun exitFullscreen() { log += "exitFs" }
-        override fun fsReveal() { log += "reveal" }
-        override fun move(dir: Dir) { log += "move:$dir" }
-        override fun fsOk() { log += "fsOk" }
-        override fun seek(seconds: Int) { log += "seek:$seconds" }
-        override fun toggleVideo() { log += "toggle" }
+        override fun forward() { log += "forward" }
+        override fun enter() { log += "enter" }
         override fun exitReader() { log += "exitReader" }
         override fun readerScroll(delta: Int) { log += "scroll:$delta" }
         override fun back(native: Boolean) { log += "back:$native" }
         override fun movePointer(dir: Dir) { log += "ptr:$dir" }
         override fun releasePointer(dir: Dir?) { log += "release:$dir" }
         override fun clickPointer() { log += "click" }
-        override fun smartOk() { log += "smartOk" }
         override fun page(down: Boolean) { log += "page:$down" }
     }
 
@@ -30,14 +25,14 @@ class KeySequencerTest {
     private val chrome = ChromeState()
     private val clock = FakeScheduler()
     private var ctx = KeyContext(fullscreen = false, imeVisible = false, isHome = false, nativeKeys = false)
-    private val keys = KeySequencer(chrome, fx, clock, { clock.now }, { ctx })
+    private val keys = KeySequencer(chrome, fx, clock) { ctx }
 
     private fun down(k: Key, repeat: Int = 0) = keys.onKey(KeyIn(k, true, repeat))
     private fun up(k: Key) = keys.onKey(KeyIn(k, false))
 
-    @Test fun shortOkInFocusModeTapsTheRingOnRelease() {
+    @Test fun okReleaseOnAPageSendsEnter() {
         assertTrue(down(Key.OK)); assertTrue(up(Key.OK))
-        assertEquals(listOf("smartOk"), fx.log); assertEquals(0, clock.pending)
+        assertEquals(listOf("enter"), fx.log); assertEquals(0, clock.pending)
     }
 
     @Test fun shortOkInPointerModeClicks() {
@@ -59,9 +54,9 @@ class KeySequencerTest {
         assertFalse(chrome.commandBar)
     }
 
-    @Test fun dpadMovesFocusOnPressOnly() {
+    @Test fun dpadIsForwardedOnPressAndRelease() {
         down(Key.UP); up(Key.UP); down(Key.LEFT, repeat = 2)
-        assertEquals(listOf("move:UP", "move:LEFT"), fx.log)
+        assertEquals(listOf("forward", "forward", "forward"), fx.log)
     }
 
     @Test fun pointerModeHoldsThenReleasesTheSameDirection() {
@@ -82,17 +77,17 @@ class KeySequencerTest {
         up(Key.BACK); assertFalse(chrome.commandBar); assertTrue(fx.log.isEmpty())
     }
 
-    @Test fun fullscreenSequenceRevealsThenNavigatesThenExits() {
+    @Test fun fullscreenBackExitsAndOkSendsEnter() {
         ctx = ctx.copy(fullscreen = true)
-        down(Key.UP)
-        down(Key.RIGHT); up(Key.OK); up(Key.BACK)
-        assertEquals(listOf("reveal", "move:RIGHT", "fsOk", "exitFs"), fx.log)
+        down(Key.RIGHT); up(Key.RIGHT); down(Key.BACK); down(Key.OK); up(Key.OK); up(Key.BACK)
+        assertEquals(listOf("forward", "forward", "enter", "exitFs"), fx.log)
+        assertEquals(0, clock.pending)
     }
 
-    @Test fun fullscreenWithoutControlsSeeksAndToggles() {
-        ctx = ctx.copy(fullscreen = true)
-        down(Key.LEFT); down(Key.RIGHT); down(Key.OK)
-        assertEquals(listOf("seek:-10", "seek:10", "toggle"), fx.log)
+    @Test fun nativeSitesGetDpadAndOkForwardedNotEnter() {
+        ctx = ctx.copy(nativeKeys = true)
+        down(Key.LEFT); down(Key.OK); up(Key.OK)
+        assertEquals(listOf("forward", "forward", "forward"), fx.log); assertEquals(0, clock.pending)
     }
 
     @Test fun readerScrollsAndBackLeavesIt() {
@@ -107,13 +102,4 @@ class KeySequencerTest {
     }
 
     @Test fun pageKeysScroll() { down(Key.PAGE_DOWN); down(Key.PAGE_UP); assertEquals(listOf("page:true", "page:false"), fx.log) }
-
-    @Test fun heldSeekGrowsWhileRepeatingAndResetsAfterAPause() {
-        val steps = ArrayList<Int>()
-        clock.advance(1_000)
-        repeat(6) { keys.seekHeld(true); clock.advance(100) }
-        clock.advance(600); keys.seekHeld(false)
-        fx.log.forEach { steps += it.removePrefix("seek:").toInt() }
-        assertEquals(listOf(10, 10, 10, 20, 20, 30, -10), steps)
-    }
 }

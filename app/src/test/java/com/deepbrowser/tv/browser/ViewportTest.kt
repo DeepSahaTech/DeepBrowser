@@ -13,8 +13,10 @@ class ViewportTest {
         assertEquals(Viewport.LAYOUT_WIDTH, Viewport.layoutWidth(null))
     }
 
-    @Test fun smartNavScriptUsesTheSameWidths() {
-        assertTrue(SmartNav.SCRIPT.contains("?${Viewport.TV_LAYOUT_WIDTH}:${Viewport.LAYOUT_WIDTH};"))
+    @Test fun tweaksScriptUsesTheViewportWidths() {
+        val js = java.io.File("src/main/assets/nav/tweaks.js").readText()
+        assertTrue(js.contains("1280"))
+        assertTrue(js.contains("1920"))
     }
 
     @Test fun scaleUnknownUntilMeasuredThenFollowsPage() {

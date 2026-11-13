@@ -12,7 +12,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.deepbrowser.tv.data.Library
@@ -47,8 +46,9 @@ class BrowserController(
     /** Read by the panels directly (Compose state lives in the module). */
     val library = Library(store)
     private val uas = UserAgents(context)
+    private val scripts = NavScripts(context)
     private val cursor = CursorState(viewport.width.toFloat(), viewport.height.toFloat())
-    private val fullscreen = FullscreenSession(FullscreenHost(overlayContainer) { tab.view.focus() }, chrome, HandlerScheduler(main))
+    private val fullscreen = FullscreenSession(FullscreenHost(overlayContainer) { tab.view.focus() })
     private val pointer = PointerInjector({ fullscreen.shown ?: tab.view.hostView }, cursor, main)
     val filters = FilterUpdater(
         adFilter, filterChoice,
@@ -83,7 +83,7 @@ class BrowserController(
     }
 
     private val session = TabSession(::createTab)
-    private val lifecycle = PageLifecycle(session, chrome, viewport, resetFocus = { nav.reset() }, inject = ::inject, closeReader = ::exitReader)
+    private val lifecycle = PageLifecycle(session, chrome, viewport, inject = ::inject, closeReader = ::exitReader)
     val tabs: List<Tab> get() = session.tabs
     val activeTab: Int get() = session.activeIndex
     private val tab: Tab get() = session.active
@@ -103,14 +103,12 @@ class BrowserController(
     var infoVisible by chrome::info
     var panel by chrome::panel
     val navMode: NavMode get() = chrome.navMode
-    val ringVisible: Boolean get() = chrome.ringVisible
     val pointerVisible: Boolean get() = chrome.pointerVisible
     val focusOwner: FocusOwner get() = chrome.owner(isHome)
     val readerOn: Boolean get() = chrome.reader
     val zoomPercent: Int get() = chrome.zoomPercent
     var companionUrl by mutableStateOf<String?>(null)
     var companionHelp by mutableStateOf(false)
-    var focusRect by mutableStateOf<Rect?>(null); private set
     var adBlockOn by mutableStateOf(adState.enabled); private set
     var cursorPos by mutableStateOf(Offset.Zero); private set
 
@@ -121,13 +119,6 @@ class BrowserController(
     var warmed = false; private set
     var onWarm: (() -> Unit)? = null
 
-    private val nav: FocusNav = FocusNav(
-        main = main,
-        evalJs = { js -> tab.view.eval(js) },
-        viewWidth = { viewport.width },
-        onRing = { focusRect = it },
-        onSeek = { fwd -> keys.seekHeld(fwd) },
-    )
     private var cursorFrameOn = false
     private var lastFrameNs = 0L
     private val cursorFrame = object : android.view.Choreographer.FrameCallback {
@@ -160,6 +151,7 @@ class BrowserController(
     /** Switch between remote focus and the mouse pointer for web pages; persisted, with a brief on-screen label. */
     fun setNavMode(m: NavMode) {
         chrome.navMode = m; settings.nav = m
+        tab.view.eval(PageApi.enable(chrome.ringVisible))
         android.widget.Toast.makeText(context, if (m == NavMode.POINTER) "Mouse pointer on" else "Remote focus on", android.widget.Toast.LENGTH_SHORT).show()
     }
 
@@ -170,25 +162,25 @@ class BrowserController(
         pageOwns = o == FocusOwner.PAGE
         tabs.forEach { it.view.setFocusable(pageOwns) }
         if (pageOwns && tab.view.ready) tab.view.focus()
+        tab.view.eval(PageApi.enable(chrome.ringVisible))
     }
 
     // ---------------------------------------------------------------- tab views
 
     private fun createTab(): TabView =
-        WebTab(context, fullscreen, events) { TabConfig(uas.of(uaMode), chrome.zoomPercent, viewport.initialScale()) }
+        WebTab(context, fullscreen, events, scripts) { TabConfig(uas.of(uaMode), chrome.zoomPercent, viewport.initialScale()) }
             .also { it.attachBridge(bridgeFor(it)); it.setFocusable(pageOwns) }
 
     private fun isActive(v: TabView) = v === tab.view
 
-    /** One bridge per tab; only the active tab's reports reach FocusNav. */
+    /** One bridge per tab. The page owns focus and the ring now: only text-field taps come back, from the active tab. */
     private fun bridgeFor(v: TabView) = object : PageBridge {
-        override fun snap(json: String) { if (isActive(v)) nav.onSnapshot(json) }
-        override fun ime(x: Float, y: Float) { if (isActive(v)) pointer.tapForKeyboard(x, y, viewport.factor(nav.cssWidth)) }
-        override fun cur(x: Float, y: Float, w: Float, h: Float) { if (isActive(v)) nav.onCurRect(x, y, w, h) }
+        override fun ime(fx: Float, fy: Float) { if (isActive(v)) pointer.tapForKeyboard(fx, fy) }
     }
 
     private fun inject(v: TabView) {
-        v.eval(SmartNav.SCRIPT)
+        v.eval(scripts.all)
+        v.eval(PageApi.enable(chrome.ringVisible)) // a new document starts with the engine on; cursor mode turns it off again
         if (adState.enabled) v.eval(adFilter.injection())
     }
 
@@ -287,15 +279,20 @@ class BrowserController(
     private fun imeVisible(): Boolean =
         ViewCompat.getRootWindowInsets(overlayContainer)?.isVisible(WindowInsetsCompat.Type.ime()) == true
 
+    /** The key event being handled; [KeyEffects.forward] passes it on unchanged. Set only for the length of [handleKey]. */
+    private var current: KeyEvent? = null
+    /** Where page keys go: the fullscreen player's view when one is shown, else the WebView. */
+    private fun keyTarget(): View = fullscreen.shown ?: tab.view.hostView
+
     /** The Android/page side of every key action; [KeySequencer] decides when each runs. */
     private val keyEffects: KeyEffects = object : KeyEffects {
-        override fun keyTouched(key: Key) = fullscreen.onKey(key)
-        override fun exitFullscreen() = fullscreen.requestExit { reply -> tab.view.eval(PageApi.menuBack(), reply) }
-        override fun fsReveal() { fullscreen.armHide(); nav.reveal() }
-        override fun move(dir: Dir) { nav.move(dir) }
-        override fun fsOk() = if (nav.sliderFocused) toggleVideo() else smartOk()
-        override fun seek(seconds: Int) = tab.view.eval(PageApi.seekBy(seconds))
-        override fun toggleVideo() = tab.view.eval(PageApi.togglePlay())
+        override fun exitFullscreen() = fullscreen.requestExit { reply -> tab.view.eval(PageApi.back(), reply) }
+        override fun forward() { current?.let { keyTarget().dispatchKeyEvent(it) } }
+        override fun enter() {
+            val v = keyTarget()
+            v.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+            v.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+        }
         override fun exitReader() = this@BrowserController.exitReader()
         override fun readerScroll(delta: Int) = tab.view.eval(PageApi.readerScroll(delta))
         override fun back(native: Boolean) =
@@ -303,19 +300,21 @@ class BrowserController(
         override fun movePointer(dir: Dir) { cursor.hold(dir, true); startCursorFrames() }
         override fun releasePointer(dir: Dir?) { if (dir != null) cursor.hold(dir, false) else cursor.releaseAll() }
         override fun clickPointer() { pointer.click() }
-        override fun smartOk() = this@BrowserController.smartOk()
         override fun page(down: Boolean) = tab.view.page(down)
     }
 
     private val keys: KeySequencer = KeySequencer(
-        chrome, keyEffects, HandlerScheduler(main), android.os.SystemClock::uptimeMillis,
+        chrome, keyEffects, HandlerScheduler(main),
         context = { KeyContext(fullscreen.active, imeVisible(), isHome, viewport.nativeKeys) },
     )
 
     /** Adapter: Android key -> [KeySequencer]. @return true if the key was consumed. */
-    fun handleKey(e: KeyEvent): Boolean =
-        keys.onKey(KeyIn(KeyMap.of(e), e.action == KeyEvent.ACTION_DOWN, e.repeatCount))
-
-    /** A real touch (not a script click) counts as a user gesture: fullscreen, keyboard and player UIs all work. */
-    private fun smartOk() { if (!pointer.tapRing(focusRect)) tab.view.eval(PageApi.ok()) }
+    fun handleKey(e: KeyEvent): Boolean {
+        current = e
+        try {
+            return keys.onKey(KeyIn(KeyMap.of(e), e.action == KeyEvent.ACTION_DOWN, e.repeatCount))
+        } finally {
+            current = null
+        }
+    }
 }
