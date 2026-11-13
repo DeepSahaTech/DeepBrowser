@@ -46,9 +46,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.deepbrowser.tv.browser.BrowserController
+import com.deepbrowser.tv.browser.FilterUpdater
 import com.deepbrowser.tv.browser.MAX_TABS
 import com.deepbrowser.tv.browser.Panel
 import com.deepbrowser.tv.browser.UrlResolver
+import com.deepbrowser.tv.data.Library
 import com.deepbrowser.tv.data.Page
 
 /** Full-screen list screens (bookmarks, history, tabs, settings). Back closes (handled in BrowserController.handleKey). */
@@ -68,10 +70,10 @@ fun PanelScreen(c: BrowserController, panel: Panel) {
             verticalArrangement = Arrangement.spacedBy(Cmp.gap / 2),
         ) {
             when (panel) {
-                Panel.Bookmarks -> bookmarkRows(c, first, rows)
-                Panel.History -> historyRows(c, first)
+                Panel.Bookmarks -> bookmarkRows(c, c.library, first, rows)
+                Panel.History -> historyRows(c, c.library, first)
                 Panel.Tabs -> tabRows(c, first, rows)
-                Panel.Settings -> settingRows(c, first, rows, editing)
+                Panel.Settings -> settingRows(c, c.filters, first, rows, editing)
             }
         }
     }
@@ -98,25 +100,25 @@ private fun PageRow(p: Page, onOpen: () -> Unit, modifier: Modifier = Modifier) 
 private fun <T> neighbour(list: List<T>, i: Int, key: (T) -> Any, fallback: Any): Any =
     list.getOrNull(i + 1)?.let(key) ?: list.getOrNull(i - 1)?.let(key) ?: fallback
 
-private fun LazyListScope.bookmarkRows(c: BrowserController, first: FocusRequester, rows: RowFocus) {
+private fun LazyListScope.bookmarkRows(c: BrowserController, lib: Library, first: FocusRequester, rows: RowFocus) {
     item("head") {
         GlassButton(onClick = { c.toggleBookmark() }, modifier = Modifier.fillMaxWidth().focusRequester(first).then(rows.modifier("head"))) {
             Label(if (c.isHome) "Open a page to bookmark it" else if (c.isBookmarked) "Remove this page" else "Bookmark this page")
         }
     }
-    if (c.bookmarks.isEmpty()) item("empty") { Label("No bookmarks yet.", muted = true) }
-    itemsIndexed(c.bookmarks, key = { _, b -> b.url }) { i, b ->
+    if (lib.bookmarks.isEmpty()) item("empty") { Label("No bookmarks yet.", muted = true) }
+    itemsIndexed(lib.bookmarks, key = { _, b -> b.url }) { i, b ->
         Row(horizontalArrangement = Arrangement.spacedBy(Cmp.gap / 2), verticalAlignment = Alignment.CenterVertically) {
             PageRow(b, { c.loadInput(b.url) }, Modifier.weight(1f))
-            GlassButton(onClick = { rows.moveTo(neighbour(c.bookmarks, i, { it.url }, "head")); c.removeBookmark(b) }, modifier = rows.modifier(b.url)) { Label("Remove") }
+            GlassButton(onClick = { rows.moveTo(neighbour(lib.bookmarks, i, { it.url }, "head")); lib.toggleBookmark(b.url, b.title) }, modifier = rows.modifier(b.url)) { Label("Remove") }
         }
     }
 }
 
-private fun LazyListScope.historyRows(c: BrowserController, first: FocusRequester) {
-    item("head") { GlassButton(onClick = { c.clearHistory() }, modifier = Modifier.fillMaxWidth().focusRequester(first)) { Label("Clear history") } }
-    if (c.historyItems.isEmpty()) item("empty") { Label("No history yet.", muted = true) }
-    items(c.historyItems, key = { it.url }) { h -> PageRow(h, { c.loadInput(h.url) }, Modifier.fillMaxWidth()) }
+private fun LazyListScope.historyRows(c: BrowserController, lib: Library, first: FocusRequester) {
+    item("head") { GlassButton(onClick = { lib.clearHistory() }, modifier = Modifier.fillMaxWidth().focusRequester(first)) { Label("Clear history") } }
+    if (lib.history.isEmpty()) item("empty") { Label("No history yet.", muted = true) }
+    items(lib.history, key = { it.url }) { h -> PageRow(h, { c.loadInput(h.url) }, Modifier.fillMaxWidth()) }
 }
 
 private fun LazyListScope.tabRows(c: BrowserController, first: FocusRequester, rows: RowFocus) {
@@ -154,17 +156,17 @@ private fun InfoRow(name: String, value: String) {
     }
 }
 
-private fun LazyListScope.settingRows(c: BrowserController, first: FocusRequester, rows: RowFocus, editing: MutableState<Boolean>) {
-    val st = c.filterStatus
+private fun LazyListScope.settingRows(c: BrowserController, f: FilterUpdater, first: FocusRequester, rows: RowFocus, editing: MutableState<Boolean>) {
+    val st = f.status
     val date = st.updatedAt?.let { DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it)) } ?: "never"
     item("ads") { SettingRow("Ad blocking", if (c.adBlockOn) "On" else "Off", Modifier.focusRequester(first)) { c.setAdBlock(!c.adBlockOn) } }
-    item("blocked") { InfoRow("Ads blocked", "${c.adsBlocked()}  (${c.filterRules} filter rules)") }
-    item("update") { SettingRow("Update filter list", if (c.filterUpdating) "Updating..." else st.result?.label ?: "Press OK") { c.updateFilterList() } }
-    item("src") { Label("Source: ${c.filterSource}  -  auto-update every $AUTO_UPDATE_DAYS days", muted = true) }
+    item("blocked") { InfoRow("Ads blocked", "${c.adsBlocked()}  (${st.rules} filter rules)") }
+    item("update") { SettingRow("Update filter list", if (f.updating) "Updating..." else st.result?.label ?: "Press OK") { f.update() } }
+    item("src") { Label("Source: ${f.source}  -  auto-update every $AUTO_UPDATE_DAYS days", muted = true) }
     item("upd") { Label("Last updated: $date  -  ${st.rules} rules", muted = true) }
     item("link") { SettingRow("Set filter list link", "https only", rows.modifier("link")) { editing.value = true } }
-    if (editing.value) item("field") { LinkField(c) { editing.value = false; rows.moveTo("link") } }
-    item("reset") { SettingRow("Reset to default", "GitHub list") { editing.value = false; c.resetFilterLink() } }
+    if (editing.value) item("field") { LinkField(f) { editing.value = false; rows.moveTo("link") } }
+    item("reset") { SettingRow("Reset to default", "GitHub list") { editing.value = false; f.resetLink() } }
     item("ua") { SettingRow("Site mode (user agent)", c.uaMode.label) { c.cycleUa() } }
     item("nav") { SettingRow("Navigation", c.navMode.label) { c.toggleNavMode() } }
     item("ptr") {
@@ -186,7 +188,7 @@ private fun ClearRow(c: BrowserController) {
 }
 
 @Composable
-private fun LinkField(c: BrowserController, onDone: () -> Unit) {
+private fun LinkField(f: FilterUpdater, onDone: () -> Unit) {
     var value by remember { mutableStateOf(TextFieldValue("https://", TextRange(8))) }
     var focused by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
@@ -198,11 +200,11 @@ private fun LinkField(c: BrowserController, onDone: () -> Unit) {
             textStyle = TextStyle(color = Sem.onSurface, fontSize = Cmp.bodyLarge),
             cursorBrush = SolidColor(Sem.focus),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Uri),
-            keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); if (c.setFilterLink(value.text)) onDone() }),
+            keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); if (f.setLink(value.text)) onDone() }),
             modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { focused = it.isFocused }
                 .border(if (focused) Cmp.focusBorder else Cmp.restBorder, if (focused) Sem.focus else Sem.outline, RoundedCornerShape(22.dp))
                 .background(Sem.background, RoundedCornerShape(22.dp)).padding(horizontal = 24.dp, vertical = 18.dp),
         )
-        c.filterLinkError?.let { Label(it, muted = true) }
+        f.linkError?.let { Label(it, muted = true) }
     }
 }

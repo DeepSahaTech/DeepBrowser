@@ -80,7 +80,7 @@ fun BrowserScreen(c: BrowserController) {
         if (c.isHome) {
             if (owner == FocusOwner.HOME) HomeScreen(
                 last = homeLast,
-                bookmarks = c.bookmarks,
+                bookmarks = c.library.bookmarks,
                 onOpen = c::loadInput,
                 onAddress = { c.commandBarVisible = true },
                 onInfo = { c.infoVisible = true },
