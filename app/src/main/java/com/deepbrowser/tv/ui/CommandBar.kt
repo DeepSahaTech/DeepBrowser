@@ -47,9 +47,9 @@ fun CommandBar(c: BrowserController) {
     val focus = remember { FocusRequester() }
     var fieldFocused by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) { focus.requestWhenReady() }
 
-    Box(Modifier.fillMaxWidth().padding(overscanPadding())) {
+    Box(Modifier.fillMaxWidth().padding(overscanPadding()).focusTrap().restoringFocus(focus)) {
         Column(
             Modifier.fillMaxWidth()
                 .glass(radius = 32, strong = true).padding(32.dp),
@@ -95,7 +95,7 @@ fun CommandBar(c: BrowserController) {
                 Chip("A−") { c.changeZoom(-10) }
                 Chip("${c.zoomPercent}%") { c.changeZoom(+10) }
                 Chip("Site: ${c.uaMode.label}") { c.cycleUa() }
-                Chip(if (c.cursorEnabled) "Cursor on" else "Cursor off") { c.cursorEnabled = !c.cursorEnabled }
+                Chip("Navigation: ${c.navMode.label}") { c.toggleNavMode() }
             }
             Spacer(Modifier.height(Cmp.gap))
             Row(horizontalArrangement = Arrangement.spacedBy(Cmp.gap), verticalAlignment = Alignment.CenterVertically) {

@@ -79,4 +79,23 @@ class KeyRouterTest {
         assertEquals(Page(true), r(down(Key.PAGE_DOWN))); assertEquals(Page(false), r(down(Key.PAGE_UP)))
     }
     @Test fun unknownKeyIsNotOurs() = assertEquals(Pass, r(down(Key.OTHER)))
+
+    // ---- native layers own the remote in every navigation mode
+    @Test fun nativeLayersGetDpadAndOkEvenInCursorMode() {
+        listOf(KeyState(overlayOpen = true, cursorMode = true), KeyState(isHome = true, cursorMode = true)).forEach { s ->
+            listOf(Key.UP, Key.DOWN, Key.LEFT, Key.RIGHT, Key.OK).forEach { k ->
+                assertEquals(Pass, r(down(k), s)); assertEquals(Pass, r(up(k), s))
+            }
+        }
+    }
+    @Test fun okNeverArmsTheLongPressWhileANativeLayerOwnsTheRemote() {
+        assertEquals(Pass, r(down(Key.OK), KeyState(overlayOpen = true))); assertEquals(Pass, r(down(Key.OK), KeyState(isHome = true)))
+        assertEquals(OkDown, r(down(Key.OK))) // the page owner still arms it
+    }
+    @Test fun cursorModeOnAPageMovesClicksAndScrollsWithDpadOnly() {
+        val s = KeyState(cursorMode = true)
+        assertEquals(MoveCursor(Dir.DOWN), r(down(Key.DOWN, repeat = 5), s))
+        assertEquals(OkDown, r(down(Key.OK), s)); assertEquals(OkUpClick, r(up(Key.OK), s))
+        assertEquals(Pass, r(down(Key.UP), KeyState(cursorMode = true, nativeKeys = true)))
+    }
 }

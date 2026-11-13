@@ -60,7 +60,12 @@ class WebTab(
     override fun applyZoom(percent: Int) { wv?.settings?.textZoom = percent }
     override fun clearData() { wv?.let { it.clearCache(true); it.clearHistory(); it.clearFormData() } }
     override fun page(down: Boolean) { (hostView as? WebView)?.let { if (down) it.pageDown(false) else it.pageUp(false) } }
+    private var canFocus = true
     override fun focus() { wv?.requestFocus() }
+    override fun setFocusable(on: Boolean) {
+        canFocus = on
+        wv?.apply { if (!on) clearFocus(); isFocusable = on; isFocusableInTouchMode = on }
+    }
     override fun pause() { wv?.onPause() }
     override fun resume() { wv?.onResume() }
     override fun destroy() {
@@ -102,8 +107,8 @@ class WebTab(
         wv.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         wv.apply {
             setBackgroundColor(0xFF0B1020.toInt())
-            isFocusable = true
-            isFocusableInTouchMode = true
+            isFocusable = canFocus
+            isFocusableInTouchMode = canFocus
             overScrollMode = View.OVER_SCROLL_NEVER
             settings.apply {
                 javaScriptEnabled = true
