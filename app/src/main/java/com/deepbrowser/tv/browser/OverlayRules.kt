@@ -35,7 +35,7 @@ object OverlayRules {
      * nodes; ONE slow timer rescanning the whole document. Nodes containing a <video> are never removed.
      */
     val JS: String = """
-  var SCAM=new RegExp('$SCAM_PATTERN','i');
+  var SCAM=new RegExp('$SCAM_PATTERN','i'),LOOSE=new RegExp(SCAM.source.replace(/ /g,'\\s+'),'i');
   function blankSrc(s){return !s||s.indexOf('about:')===0||s.indexOf('javascript:')===0;}
   function scan(root){
     try{
@@ -55,6 +55,7 @@ object OverlayRules {
             if(r.width>innerWidth*$TRAP_COVER&&r.height>innerHeight*$TRAP_COVER&&!n.querySelector('video')){n.remove();continue;}
           }
         }
+        if(!LOOSE.test(n.textContent||''))continue; // cheap, layout-free prefilter: innerText forces layout on every div
         var t=n.innerText||'';
         if(t.length>0&&t.length<$MAX_TEXT&&SCAM.test(t)&&!n.querySelector('video')){
           var el=n;

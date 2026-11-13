@@ -32,6 +32,8 @@
   var ringEl = null, ringShown = false, ringKey = '';
   var returnTo = null;             // {el, rect} of the last OK: where focus goes back when what it opened closes
   var wasMode = false;             // videoMode() on the previous frame
+  var smoothUntil = 0;             // a smooth scroll may still be moving the page until then
+  var modeAt = 0;                  // when the frame loop last asked videoMode() (it queries the DOM: not every frame)
   var inFrame = window !== window.top;   // iframes draw the ring only while they hold document focus
 
   // ---- small DOM helpers (every call tolerates missing APIs) ----
@@ -259,7 +261,8 @@
     // Skip fixed/sticky bars (site menus); a fixed screen band would also skip detail-page Play buttons near the top.
     var pref = ok.filter(function (c) {
       var r = c.rect, small = (r.b - r.t) < 0.08 * VH && r.t < 0.1 * VH; // top-bar icons (back, mute, logo)
-      return !inFixedOrSticky(c.el) && c.el.tagName !== 'VIDEO' && !small;
+      var tiny = r.r - r.l < 24 || r.b - r.t < 24;   // 16 px vote/like icons above a detail page's Play button
+      return !inFixedOrSticky(c.el) && c.el.tagName !== 'VIDEO' && !small && !tiny;
     });
     if (pref.length) ok = pref;
     ok.forEach(function (c) {
@@ -314,7 +317,7 @@
     }
     return null;
   }
-  // Bring el inside the inset visible area, instantly (D.7).
+  // Bring el inside the inset visible area (D.7), with a smooth scroll.
   function scrollInto(el) {
     var r = rectOf(el);
     if (!r || typeof el.scrollIntoView !== 'function') return;
@@ -324,8 +327,11 @@
       r: Math.min(VW, b ? b.r : VW), b: Math.min(VH, b ? b.b : VH) };
     var w = V.r - V.l, h = V.b - V.t;
     var I = { l: V.l + 0.05 * w, r: V.r - 0.05 * w, t: V.t + 0.1 * h, b: V.b - 0.1 * h };
-    if (r.t >= I.t && r.b <= I.b && r.l >= I.l && r.r <= I.r) return;
-    el.scrollIntoView({ block: (r.b - r.t) > 0.8 * (I.b - I.t) ? 'start' : 'center', inline: 'nearest', behavior: 'instant' });
+    // In view mid-scroll proves nothing: the running scroll can carry it out, so re-aim at this element.
+    if (r.t >= I.t && r.b <= I.b && r.l >= I.l && r.r <= I.r && Date.now() > smoothUntil) return;
+    smoothUntil = Date.now() + 800;
+    // Smooth: an instant jump loses the eye's place on a TV; the ring follows the element every frame.
+    el.scrollIntoView({ block: (r.b - r.t) > 0.8 * (I.b - I.t) ? 'start' : 'center', inline: 'nearest', behavior: 'smooth' });
   }
 
   // ---- scoring with hit-test retry (D.6) ----
@@ -497,7 +503,9 @@
   }
   function frame() {
     var el = last && last.el, now = Date.now();
-    var inMode = !!videoMode(), closedPlayer = wasMode && !inMode;
+    var inMode = wasMode;
+    if (now - modeAt >= 250) { modeAt = now; inMode = !!videoMode(); }
+    var closedPlayer = wasMode && !inMode;
     wasMode = inMode;
     if (el) {
       if (el.isConnected) last.rect = rectOf(el) || last.rect;
@@ -507,7 +515,7 @@
         var back = returnTo.el;
         returnTo = null;
         focusEl(back, true);
-      } else if (!el.isConnected || (now - lastKeyAt > 600 && (!last.rect || viewFrac(last.rect) < 0.5))) {
+      } else if (!el.isConnected || (now - lastKeyAt > 1000 && (!last.rect || viewFrac(last.rect) < 0.5))) {
         carry();
       }
     }
@@ -654,7 +662,7 @@
       if (lr && isSliderEl(a) && (!modeNow || sliderNotTimeline(a, modeNow))) return;   // native slider keeps Left/Right
       lastMoveAt = now;
       lastKeyAt = now;
-      var R = scopeRoot(), full = !!videoMode(), cands = candidates(R, full);
+      var R = scopeRoot(), full = !!modeNow, cands = candidates(R, full);
       if (full && fullscreenKey(e, dir, a, R, cands)) return;
       var S = startFrom(a);
       // A start outside the scope root (e.g. page behind an overlay) means no start: pick inside R.
