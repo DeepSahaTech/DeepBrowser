@@ -78,6 +78,15 @@ class KeyRouterTest {
     }
     @Test fun unknownKeyIsNotOurs() = assertEquals(Pass, r(down(Key.OTHER)))
 
+    @Test fun pointerModeMovesCursorInFullscreen() {
+        val s = KeyState(fullscreen = true, cursorMode = true)
+        assertEquals(MoveCursor(Dir.LEFT), r(down(Key.LEFT, repeat = 3), s))
+        assertEquals(ReleaseCursor, r(up(Key.LEFT), s))
+        assertEquals(OkDown, r(down(Key.OK), s)); assertEquals(OkUpClick, r(up(Key.OK), s))
+        assertEquals(OkUpLong, r(up(Key.OK), KeyState(fullscreen = true, cursorMode = true, okLongFired = true)))
+        assertEquals(ExitFullscreen, r(up(Key.BACK), s)) // BACK unchanged
+    }
+
     // ---- native layers own the remote in every navigation mode
     @Test fun nativeLayersGetDpadAndOkEvenInCursorMode() {
         listOf(KeyState(overlayOpen = true, cursorMode = true), KeyState(isHome = true, cursorMode = true)).forEach { s ->

@@ -1,6 +1,7 @@
 package com.deepbrowser.tv.browser
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assume
 import org.junit.Test
 import java.io.File
@@ -18,6 +19,8 @@ class NavEngineJsTest {
     @Test
     fun navCoreNodeTestsPass() {
         val node = findNode()
+        // CI must never silently skip the Node tests: missing node is a failure there.
+        if (System.getenv("CI") != null) assertNotNull("node binary not found in CI", node)
         Assume.assumeTrue(node != null)
         // Node 24 rejects a bare directory for --test, so name the test file.
         val process = ProcessBuilder(node, "--test",

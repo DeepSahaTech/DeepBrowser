@@ -79,6 +79,18 @@
   function isSliderEl(a) {
     return !!a && (a.getAttribute('role') === 'slider' || (a.tagName === 'INPUT' && a.type === 'range'));
   }
+  // The player timeline: the findSlider bar, or any slider at least half as wide as the mode root.
+  function isTimelineEl(a, R) {
+    if (!a) return false;
+    if (a === findSlider(R)) return true;
+    if (!isSliderEl(a)) return false;
+    var r = rectOf(a), m = rectOf(R);
+    return !!r && !!m && (r.r - r.l) >= 0.5 * (m.r - m.l);
+  }
+  // A native slider that is not the timeline (e.g. volume) keeps Left/Right in player mode.
+  function sliderNotTimeline(a, mode) {
+    return !!mode && isSliderEl(a) && !isTimelineEl(a, mode.root);
+  }
   // Caret owns Left/Right while it is inside the text (selection rules of D.9).
   function caretBusy(a, dir) {
     if (typeof a.selectionStart !== 'number') return false;
@@ -537,8 +549,7 @@
         T.click();
       }
     }
-    menuBase = cands.length;
-    menuOpener = T;
+    if (mode) { menuBase = cands.length; menuOpener = T; }   // the player-menu memory only applies inside player/fullscreen
     setTimeout(function () {
       var n = doc.activeElement;
       if (n !== T && isTextEl(n)) ime(n);   // a field that OK just focused gets the keyboard
@@ -578,7 +589,7 @@
     var lr = dir === 'left' || dir === 'right';
     wake(R);
     // Left/Right seek from BODY, the video or the timeline whatever the controls' visibility.
-    var seekFocus = isBody(a) || a.tagName === 'VIDEO' || isSliderEl(a);
+    var seekFocus = isBody(a) || (!!a && a.tagName === 'VIDEO') || isTimelineEl(a, R);
     if (lr && (seekFocus || (hidden && !inside))) {
       seek(R, dir === 'left' ? -1 : 1);
       handled(e);
@@ -606,7 +617,8 @@
       var a = doc.activeElement || null;
       var lr = dir === 'left' || dir === 'right';
       if (lr && isTextEl(a) && caretBusy(a, dir)) return;     // caret keeps the key
-      if (lr && isSliderEl(a) && !videoMode()) return;        // native slider keeps Left/Right
+      var modeNow = videoMode();
+      if (lr && isSliderEl(a) && (!modeNow || sliderNotTimeline(a, modeNow))) return;   // native slider keeps Left/Right
       lastMoveAt = now;
       lastKeyAt = now;
       var R = scopeRoot(), full = !!videoMode(), cands = candidates(R, full);
@@ -637,7 +649,9 @@
       if (!enabled || !PLAYER_KEYS[e.key] || e.ctrlKey || e.altKey || e.metaKey) return;
       var a = doc.activeElement || null, fe = doc.fullscreenElement || doc.webkitFullscreenElement || null;
       if (isTextEl(a) || (a && a.isContentEditable) || (fe && fe.tagName === 'IFRAME')) return;
-      if (!videoMode()) return;
+      var modeP = videoMode();
+      if (!modeP) return;
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && sliderNotTimeline(a, modeP)) return;   // site's own slider handles it
       onKeyDown(e);
       // Not consumed by the engine: let the site have it, and keep the bubble pass from retrying it.
       if (!e.defaultPrevented) { playerEvt = e; return; }

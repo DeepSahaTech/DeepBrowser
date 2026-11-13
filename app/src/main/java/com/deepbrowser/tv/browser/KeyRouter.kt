@@ -43,7 +43,7 @@ sealed interface KeyAction {
 /** The remote's decision tree as a pure function; the controller only executes the returned action. */
 object KeyRouter {
     fun route(k: KeyIn, s: KeyState): KeyAction {
-        if (s.fullscreen) return fullscreen(k)
+        if (s.fullscreen) return fullscreen(k, s)
         // The long press already opened the command bar: swallow the rest of that press so its release cannot click an item.
         if (k.key == Key.OK && s.okLongFired) return if (k.down) KeyAction.Consume else KeyAction.OkUpLong
         if (s.imeVisible) return KeyAction.Pass
@@ -75,10 +75,21 @@ object KeyRouter {
         }
     }
 
-    private fun fullscreen(k: KeyIn): KeyAction = when (k.key) {
+    private fun fullscreen(k: KeyIn, s: KeyState): KeyAction = when (k.key) {
         Key.BACK -> if (!k.down) KeyAction.ExitFullscreen else KeyAction.Consume
-        Key.UP, Key.DOWN, Key.LEFT, Key.RIGHT -> KeyAction.Forward
-        Key.OK -> if (!k.down) KeyAction.OkUpSmart else KeyAction.Consume // OK acts once, on release, as Enter
+        // Pointer mode wins in fullscreen too, with the same actions as the page path.
+        Key.UP, Key.DOWN, Key.LEFT, Key.RIGHT -> when {
+            s.cursorMode -> if (k.down) KeyAction.MoveCursor(dirOf(k.key)!!) else KeyAction.ReleaseCursor
+            else -> KeyAction.Forward
+        }
+        Key.OK -> when {
+            s.cursorMode -> when {
+                k.down -> if (k.repeat == 0) KeyAction.OkDown else KeyAction.Consume
+                s.okLongFired -> KeyAction.OkUpLong
+                else -> KeyAction.OkUpClick
+            }
+            else -> if (!k.down) KeyAction.OkUpSmart else KeyAction.Consume // OK acts once, on release, as Enter
+        }
         else -> KeyAction.Pass
     }
 
