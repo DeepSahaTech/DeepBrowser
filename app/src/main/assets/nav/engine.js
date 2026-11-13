@@ -21,10 +21,13 @@
 
   var enabled = true, looping = false;
   var last = null;                 // {el, rect}: focused element and its latest rect
+  var exitTriedAt = 0;             // last Back that tried the player's own exit arrow
   var lastKeyAt = 0, lastMoveAt = 0;
   var menuBase = 0, menuOpener = null;
   var seekRun = 0, seekAt = 0, jitter = 0;
   var consumed = {};               // keys we handled on keydown; their keyup is swallowed too
+  var playerEvt = null;            // keydown already offered to the engine by the capture pass
+  var playerUp = {};               // keys consumed in the capture pass; their keyup is swallowed there
   var ids = new WeakMap(), nextId = 1, warmed = {};
   var ringEl = null, ringShown = false, ringKey = '';
 
@@ -113,7 +116,51 @@
     var list = Array.prototype.slice.call(top.querySelectorAll(SEL));
     return list.some(isVisible) ? top : null;
   }
-  function scopeRoot() { return fsRootEl() || modalEl() || overlayRoot() || doc.documentElement; }
+  function scopeRoot() {
+    var fs = fsRootEl();
+    if (fs) return fs;
+    var m = modalEl();
+    if (m) return m;
+    var v = playerVideo();
+    if (v) return playerRoot(v);
+    return overlayRoot() || doc.documentElement;
+  }
+  // Share of the viewport covered by the visible part of a rect.
+  function clipFrac(r) {
+    var w = Math.min(r.r, vw()) - Math.max(r.l, 0), h = Math.min(r.b, vh()) - Math.max(r.t, 0);
+    return w <= 0 || h <= 0 ? 0 : (w * h) / ((vw() * vh()) || 1);
+  }
+  // Page-level player (no browser fullscreen): the largest visible video covering >= 80% of the viewport.
+  // A muted autoplay video is an idle banner, not a player.
+  function playerVideo() {
+    var best = null, bestF = 0.8;
+    Array.prototype.forEach.call(doc.querySelectorAll('video'), function (v) {
+      if (v.muted && v.autoplay) return;
+      var r = rectOf(v), f = r ? clipFrac(r) : 0;
+      if (f >= bestF && isVisible(v)) { bestF = f; best = v; }
+    });
+    return best;
+  }
+  // Nearest ancestor covering >= 80% of the viewport that holds a non-VIDEO candidate (controls shown).
+  // Controls hidden: the nearest covering ancestor. Nothing covering: the document.
+  function playerRoot(v) {
+    var covering = null;
+    for (var p = v.parentElement; p && !isBody(p); p = p.parentElement) {
+      var r = rectOf(p);
+      if (!r || clipFrac(r) < 0.8) continue;
+      if (!covering) covering = p;
+      if (candidates(p, true).some(function (c) { return c.el.tagName !== 'VIDEO'; })) return p;
+    }
+    return covering || doc.documentElement;
+  }
+  // Fullscreen or player mode: the root and video that get the fullscreen rules. Null on a plain page.
+  function videoMode() {
+    var fs = fsRootEl();
+    if (fs) return { root: fs, video: largestVideo(fs), player: false };
+    if (modalEl()) return null;
+    var v = playerVideo();
+    return v ? { root: playerRoot(v), video: v, player: true } : null;
+  }
   function largestVideo(R) {
     var list = Array.prototype.slice.call(R.querySelectorAll('video'));
     if (R.tagName === 'VIDEO') list.unshift(R);
@@ -286,6 +333,8 @@
     return false;
   }
   function choose(dir, S, list) {
+    // Player controls overlay the video and toggle pointer-events while fading, so a hit test would reject them.
+    if (videoMode()) return core.pick(dir, S.rect, list);
     for (var tries = 0; tries < 10 && list.length; tries++) {
       var p = core.pick(dir, S.rect, list);
       if (!p) return null;
@@ -368,8 +417,12 @@
     if (el.tabIndex < 0 && !el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
     try { el.focus({ preventScroll: true }); } catch (e) { /* not focusable */ }
     if (!quiet) {
-      if (prev && prev !== el) hover(prev, ['pointerout', 'mouseout']);
-      hover(el, ['pointerover', 'mouseover', 'mouseenter', 'pointermove']);
+      // Fullscreen or player mode: synthetic hover opens site menus by itself and mouse-out closes them
+      // (an open subtitle menu faded out as focus moved into it), so no hover events there at all.
+      if (!videoMode()) {
+        if (prev && prev !== el) hover(prev, ['pointerout', 'mouseout']);
+        hover(el, ['pointerover', 'mouseover', 'mouseenter', 'pointermove']);
+      }
       warm(el);
       scrollInto(el);
     }
@@ -452,16 +505,23 @@
     e.preventDefault();
   }
   function onOk(e) {
-    var T = doc.activeElement || null, R = scopeRoot(), full = !!fsRootEl();
+    var T = doc.activeElement || null, R = scopeRoot(), mode = videoMode(), full = !!mode;
     var cands = candidates(R, full);
-    if (isBody(T)) {
-      var p = initialPick(cands);
-      if (p) { focusEl(p.el); handled(e); }
+    // Player or fullscreen: OK on BODY or the video toggles play whatever the controls' visibility.
+    if (full && mode.video && (isBody(T) || T === mode.video)) {
+      togglePlay(mode.video);
+      handled(e);
       return;
     }
+    // Controls hidden: OK toggles play even with focus on BODY (checked before the BODY pick).
     if (full && cands.every(function (c) { return c.el.tagName === 'VIDEO'; })) {
       var v = largestVideo(R);
       if (v) { togglePlay(v); handled(e); }
+      return;
+    }
+    if (isBody(T)) {
+      var p = initialPick(cands);
+      if (p) { focusEl(p.el); handled(e); }
       return;
     }
     var kind = core.okAction(T.tagName, T.type, T.getAttribute('role'), T.isContentEditable, false);
@@ -517,7 +577,9 @@
     var inside = !!a && a !== R && R.contains(a);
     var lr = dir === 'left' || dir === 'right';
     wake(R);
-    if (lr && hidden && (!inside || a.tagName === 'VIDEO' || isSliderEl(a))) {
+    // Left/Right seek from BODY, the video or the timeline whatever the controls' visibility.
+    var seekFocus = isBody(a) || a.tagName === 'VIDEO' || isSliderEl(a);
+    if (lr && (seekFocus || (hidden && !inside))) {
       seek(R, dir === 'left' ? -1 : 1);
       handled(e);
       return true;
@@ -533,6 +595,7 @@
   // ---- key intake (D.1) ----
   function onKeyDown(e) {
     try {
+      if (e === playerEvt) return;   // already offered by the capture pass and not consumed there
       if (!enabled || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
       if (YT_TV.test(String(location.href || ''))) return;
       if (e.key === 'Enter') return onOk(e);
@@ -543,10 +606,10 @@
       var a = doc.activeElement || null;
       var lr = dir === 'left' || dir === 'right';
       if (lr && isTextEl(a) && caretBusy(a, dir)) return;     // caret keeps the key
-      if (lr && isSliderEl(a) && !fsRootEl()) return;         // native slider keeps Left/Right
+      if (lr && isSliderEl(a) && !videoMode()) return;        // native slider keeps Left/Right
       lastMoveAt = now;
       lastKeyAt = now;
-      var R = scopeRoot(), full = !!fsRootEl(), cands = candidates(R, full);
+      var R = scopeRoot(), full = !!videoMode(), cands = candidates(R, full);
       if (full && fullscreenKey(e, dir, a, R, cands)) return;
       var S = startFrom(a);
       // A start outside the scope root (e.g. page behind an overlay) means no start: pick inside R.
@@ -566,6 +629,29 @@
     try {
       if (consumed[e.key]) { consumed[e.key] = false; e.preventDefault(); }
     } catch (err) { /* ignore */ }
+  }
+  // ---- player/fullscreen capture: runs before the site's own key listeners (window, capture phase) ----
+  var PLAYER_KEYS = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Enter: 1 };
+  function onPlayerKey(e) {
+    try {
+      if (!enabled || !PLAYER_KEYS[e.key] || e.ctrlKey || e.altKey || e.metaKey) return;
+      var a = doc.activeElement || null, fe = doc.fullscreenElement || doc.webkitFullscreenElement || null;
+      if (isTextEl(a) || (a && a.isContentEditable) || (fe && fe.tagName === 'IFRAME')) return;
+      if (!videoMode()) return;
+      onKeyDown(e);
+      // Not consumed by the engine: let the site have it, and keep the bubble pass from retrying it.
+      if (!e.defaultPrevented) { playerEvt = e; return; }
+      playerUp[e.key] = true;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    } catch (err) { /* the key keeps its default path */ }
+  }
+  function onPlayerKeyUp(e) {
+    if (!playerUp[e.key]) return;
+    playerUp[e.key] = false;
+    consumed[e.key] = false;
+    e.preventDefault();
+    e.stopImmediatePropagation();
   }
 
   // ---- Back (D.10) ----
@@ -596,14 +682,78 @@
       focusEl(last.el);
     }
   }
+  // Page player: Escape the open site menu; if it stays visible, click its opener, then refocus the opener.
+  function closePlayerMenu(op) {
+    var a = doc.activeElement || null;
+    ['keydown', 'keyup'].forEach(function (t) {
+      [a, doc].forEach(function (target) {
+        if (!target) return;
+        try { target.dispatchEvent(new KeyboardEvent(t, { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true })); } catch (e) {}
+      });
+    });
+    if (a && a.isConnected && typeof a.checkVisibility === 'function' && a.checkVisibility()) op.click();
+    focusEl(op);
+    return 'closed';
+  }
+  // Focus sits inside the player but outside its bottom control row, so a site menu is open.
+  // shortcut: bottom row = centre in the bottom 20% of the player root; upgrade if menus sit lower.
+  function focusInPlayerMenu(root, op) {
+    var a = doc.activeElement || null, rr = rectOf(root), ar = a && rectOf(a);
+    if (!a || a === op || isBody(a) || !root.contains(a) || !rr || !ar) return false;
+    return cy(ar) < rr.b - 0.2 * (rr.b - rr.t);
+  }
+  // Site's own back/close control: visible button/link by label, else an svg-only button in the top-left 20%.
+  // SVG elements have no click(); a bubbling click event reaches the site's handler for both kinds.
+  function pressEl(el) {
+    var r = rectOf(el), x = r ? cx(r) : 0, y = r ? cy(r) : 0;
+    fire(el, ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'], x, y);
+  }
+  function playerExitEl(root) {
+    var rr = rectOf(root), EXIT = /^(back|go back|close|exit|exit player)$/i;
+    if (!rr) return null;
+    var els = Array.prototype.slice.call(root.querySelectorAll('button,[role=button],a'));
+    var byLabel = els.filter(function (el) {
+      if (!isVisible(el)) return false;
+      return [el.getAttribute('aria-label'), el.title, el.innerText].some(function (s) {
+        return EXIT.test(String(s || '').trim());
+      });
+    })[0];
+    if (byLabel) return byLabel;
+    // Else a text-free clickable (button, or a bare svg with cursor:pointer as on Movy) in the top-left 20%.
+    return Array.prototype.slice.call(root.querySelectorAll('button,svg,[role=button]')).filter(function (el) {
+      var r = rectOf(el);
+      if (!r || !isVisible(el) || textOf(el)) return false;
+      if (el.tagName.toLowerCase() === 'svg' && styleOf(el).cursor !== 'pointer') return false;
+      return r.l < rr.l + 0.2 * (rr.r - rr.l) && r.t < rr.t + 0.2 * (rr.b - rr.t);
+    })[0] || null;
+  }
   function back() {
     try {
-      var fsEl = fsRootEl(), op = menuOpener;
-      if (fsEl && op) menuOpener = null;   // the player-menu memory only applies in fullscreen
-      if (fsEl && op && op.isConnected && candidates(fsEl, true).length >= menuBase + 3) {
+      var mode = videoMode(), op = menuOpener;
+      if (mode && op) menuOpener = null;   // the player-menu memory only applies in fullscreen or player mode
+      if (mode && op && op.isConnected && candidates(mode.root, true).length >= menuBase + 3) {
+        if (mode.player) return closePlayerMenu(op);
         op.click();
         focusEl(op);
         return 'closed';
+      }
+      if (mode && mode.player) {
+        if (op && op.isConnected && focusInPlayerMenu(mode.root, op)) return closePlayerMenu(op);
+        var exit = playerExitEl(mode.root);
+        if (exit) { pressEl(exit); return 'closed'; }
+        // Sites remove the idle top bar from the DOM: wake the controls and click the arrow once it is back.
+        // A second Back within 2 s with nothing found falls through, so Back can never get stuck here.
+        var now = Date.now();
+        if (now - exitTriedAt > 2000) {
+          exitTriedAt = now;
+          wake(mode.root);
+          setTimeout(function () {
+            var m = videoMode(), e = m && m.player ? playerExitEl(m.root) : null;
+            if (e) pressEl(e);
+          }, 300);
+          return 'closed';
+        }
+        return 'none';   // page player with no site back control: the site handles Back
       }
       if (window.__dbUnfake && window.__dbUnfake()) return 'closed';
       if (doc.fullscreenElement || doc.webkitFullscreenElement) {
@@ -663,10 +813,11 @@
   function debug(dir) {
     var out = {};
     try {
-      var a = doc.activeElement || null, R = scopeRoot(), full = !!fsRootEl();
+      var a = doc.activeElement || null, R = scopeRoot(), vm = videoMode(), full = !!vm;
       var S = startFrom(a);
       out.active = a ? describe(a) : null;
       out.scope = describe(R);
+      out.mode = vm ? (vm.player ? 'player' : 'fullscreen') : 'page';
       out.chain = containers(S && S.el, R).map(function (c) { return c.tagName; });
       var cands = candidates(R, full);
       out.count = cands.length;
@@ -688,6 +839,8 @@
 
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('keydown', onPlayerKey, true);
+  window.addEventListener('keyup', onPlayerKeyUp, true);
   doc.addEventListener('fullscreenchange', moveRing);
   doc.addEventListener('webkitfullscreenchange', moveRing);
   window.__dbNav = { back: back, enable: enable, debug: debug };
