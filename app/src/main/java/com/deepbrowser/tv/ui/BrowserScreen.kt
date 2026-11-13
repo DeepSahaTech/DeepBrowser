@@ -89,7 +89,7 @@ fun BrowserScreen(c: BrowserController) {
         }
 
         val ring = c.focusRect
-        if (ring != null && !c.isHome && !c.cursorEnabled && !c.commandBarVisible && !c.infoVisible && c.panel == null) {
+        if (ring != null && !c.isHome && c.ringVisible) {
             val r by animateRectAsState(ring, spring(dampingRatio = 0.85f, stiffness = 900f), label = "focusRing")
             val d = LocalDensity.current
             val pad = 4.dp
@@ -103,7 +103,7 @@ fun BrowserScreen(c: BrowserController) {
             )
         }
 
-        if (!c.isHome && c.cursorEnabled && !c.commandBarVisible && !c.infoVisible && c.panel == null) {
+        if (!c.isHome && c.pointerVisible) {
             val r = 14.dp
             Box(
                 Modifier

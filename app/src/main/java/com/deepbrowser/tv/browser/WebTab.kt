@@ -32,7 +32,7 @@ import com.deepbrowser.tv.player.MediaUrl
 @SuppressLint("SetJavaScriptEnabled")
 class WebTab(
     private val context: Context,
-    private val fullscreen: FullscreenHost,
+    private val fullscreen: FullscreenSession,
     private val events: PageEvents,
     private val config: () -> TabConfig,
 ) : TabView {

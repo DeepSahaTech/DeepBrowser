@@ -23,12 +23,15 @@ class Settings(private val store: Store) {
         set(v) { field = v; save() }
 
     /** Mouse pointer speed multiplier. */
-    var pointerSpeed: Float = o.optDouble("ptr", 1.0).toFloat().coerceIn(0.5f, 2.5f)
-        set(v) { field = v; save() }
+    var pointerSpeed: Float = clampSpeed(o.optDouble("ptr", 1.0).toFloat())
+        set(v) { field = clampSpeed(v); save() }
 
     private fun save() {
         store.write(KEY, JSONObject().put("ua", ua.name).put("nav", nav.name).put("ptr", pointerSpeed.toDouble()).toString())
     }
 
-    private companion object { const val KEY = "settings" }
+    private companion object {
+        const val KEY = "settings"
+        fun clampSpeed(v: Float) = v.coerceIn(0.5f, 2.5f)
+    }
 }

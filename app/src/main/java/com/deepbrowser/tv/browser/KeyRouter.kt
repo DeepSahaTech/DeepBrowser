@@ -3,8 +3,7 @@ package com.deepbrowser.tv.browser
 enum class Key { BACK, UP, DOWN, LEFT, RIGHT, OK, MENU, PAGE_UP, PAGE_DOWN, OTHER }
 
 enum class Dir(val js: String) {
-    UP("up"), DOWN("down"), LEFT("left"), RIGHT("right");
-    companion object { fun parse(s: String): Dir? = values().firstOrNull { it.js == s } }
+    UP("up"), DOWN("down"), LEFT("left"), RIGHT("right")
 }
 
 /** A key event with no Android types. [down] false means key-up. */
